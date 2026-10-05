@@ -7397,8 +7397,11 @@ export class GameEngine3D {
     const totalEl = document.getElementById('active-crops-total');
     if (!listEl) return;
 
+    const mobileTotal = document.getElementById('mobile-crop-badge');
+
     if (!this.crops || this.crops.size === 0) {
       if (totalEl) totalEl.textContent = '0';
+      if (mobileTotal) mobileTotal.textContent = '0';
       listEl.innerHTML = `
         <div class="empty-crops-msg">
           <span class="empty-msg-icon">🌱</span>
@@ -7410,6 +7413,7 @@ export class GameEngine3D {
     }
 
     if (totalEl) totalEl.textContent = this.crops.size.toString();
+    if (mobileTotal) mobileTotal.textContent = this.crops.size.toString();
 
     // Group active crops by cropType
     const cropGroups = new Map();

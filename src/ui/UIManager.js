@@ -98,8 +98,28 @@ export class UIManager {
             </div>
           </div>
 
+          <!-- Mobile Collapsible Controls Bar (Only visible on screens <= 900px) -->
+          <div class="mobile-hud-toggle-bar" id="mobile-hud-toggle-bar">
+            <button class="mobile-toggle-btn" id="btn-toggle-mobile-dock" aria-label="أدوات اللعبة">
+              <span>⚡ القائمة</span>
+              <span class="toggle-indicator" id="dock-toggle-indicator">▼</span>
+            </button>
+            <button class="mobile-toggle-btn" id="btn-toggle-mobile-crops" aria-label="المحاصيل">
+              <span>🌱 المحاصيل</span>
+              <span class="mobile-crop-count" id="mobile-crop-badge">0</span>
+            </button>
+            <button class="mobile-toggle-btn icon-only" id="btn-toggle-mobile-vitals" aria-label="تصغير">
+              <span id="vitals-toggle-icon">👁️</span>
+            </button>
+          </div>
+
           <!-- 4. Action Buttons Dock (Pure Image/Icon Buttons with Rich Tooltips) -->
           <div class="hud-action-dock" id="hud-action-dock">
+            <div class="mobile-dock-header">
+              <span class="mobile-dock-title">⚡ قائمة الأدوات والخدمات</span>
+              <button class="mobile-panel-close-btn" id="btn-close-mobile-dock" title="إغلاق">✕</button>
+            </div>
+
             <button class="dock-btn market-btn" id="btn-open-market" aria-label="المتجر">
               <span class="dock-icon">🏪</span>
               <div class="dock-tooltip">
@@ -180,6 +200,8 @@ export class UIManager {
                 <div class="dock-tooltip-title">🔊 الصوت والموسيقى</div>
                 <div class="dock-tooltip-desc">كتم أو تشغيل المؤثرات الصوتية والموسيقى</div>
               </div>
+            </button>
+
             <button class="dock-btn pixel-btn" id="btn-toggle-pixel" aria-label="أسلوب البكسل">
               <span class="dock-icon">👾</span>
               <div class="dock-tooltip">
@@ -212,7 +234,10 @@ export class UIManager {
                 <span class="crops-hud-icon">🌱</span>
                 <span>المحاصيل المزروعة</span>
               </div>
-              <span class="crops-total-badge" id="active-crops-total">0</span>
+              <div class="crops-header-actions">
+                <span class="crops-total-badge" id="active-crops-total">0</span>
+                <button class="mobile-panel-close-btn" id="btn-close-mobile-crops" title="إغلاق">✕</button>
+              </div>
             </div>
             <div class="crops-hud-list" id="active-crops-list">
               <div class="empty-crops-msg">
@@ -553,6 +578,107 @@ export class UIManager {
     if (portraitBtn) portraitBtn.addEventListener('click', () => { sounds.click(); this.openLevelsModal(); });
     const levelRowBtn = document.getElementById('btn-level-row');
     if (levelRowBtn) levelRowBtn.addEventListener('click', () => { sounds.click(); this.openLevelsModal(); });
+
+    // Mobile Controls Toggles (Dock drawer, Active Crops, Vitals Compact)
+    const btnMobileDock = document.getElementById('btn-toggle-mobile-dock');
+    const btnCloseMobileDock = document.getElementById('btn-close-mobile-dock');
+    const dockEl = document.getElementById('hud-action-dock');
+    const dockIndicator = document.getElementById('dock-toggle-indicator');
+
+    const toggleMobileDock = (open) => {
+      if (!dockEl) return;
+      const willOpen = typeof open === 'boolean' ? open : !dockEl.classList.contains('mobile-expanded');
+      dockEl.classList.toggle('mobile-expanded', willOpen);
+      if (dockIndicator) dockIndicator.textContent = willOpen ? '▲' : '▼';
+      if (btnMobileDock) btnMobileDock.classList.toggle('active', willOpen);
+      if (willOpen) {
+        const cropsEl = document.getElementById('active-crops-hud');
+        const btnCrops = document.getElementById('btn-toggle-mobile-crops');
+        if (cropsEl) cropsEl.classList.remove('mobile-expanded');
+        if (btnCrops) btnCrops.classList.remove('active');
+      }
+    };
+
+    if (btnMobileDock) {
+      btnMobileDock.addEventListener('click', (e) => {
+        e.stopPropagation();
+        sounds.click();
+        toggleMobileDock();
+      });
+    }
+    if (btnCloseMobileDock) {
+      btnCloseMobileDock.addEventListener('click', (e) => {
+        e.stopPropagation();
+        sounds.click();
+        toggleMobileDock(false);
+      });
+    }
+
+    const btnMobileCrops = document.getElementById('btn-toggle-mobile-crops');
+    const btnCloseMobileCrops = document.getElementById('btn-close-mobile-crops');
+    const cropsEl = document.getElementById('active-crops-hud');
+
+    const toggleMobileCrops = (open) => {
+      if (!cropsEl) return;
+      const willOpen = typeof open === 'boolean' ? open : !cropsEl.classList.contains('mobile-expanded');
+      cropsEl.classList.toggle('mobile-expanded', willOpen);
+      if (btnMobileCrops) btnMobileCrops.classList.toggle('active', willOpen);
+      if (willOpen) {
+        toggleMobileDock(false);
+      }
+    };
+
+    if (btnMobileCrops) {
+      btnMobileCrops.addEventListener('click', (e) => {
+        e.stopPropagation();
+        sounds.click();
+        toggleMobileCrops();
+      });
+    }
+    if (btnCloseMobileCrops) {
+      btnCloseMobileCrops.addEventListener('click', (e) => {
+        e.stopPropagation();
+        sounds.click();
+        toggleMobileCrops(false);
+      });
+    }
+
+    const btnMobileVitals = document.getElementById('btn-toggle-mobile-vitals');
+    const rightHud = document.getElementById('stardew-right-hud');
+    if (btnMobileVitals && rightHud) {
+      btnMobileVitals.addEventListener('click', (e) => {
+        e.stopPropagation();
+        sounds.click();
+        const isCollapsed = rightHud.classList.toggle('compact-mode');
+        const icon = document.getElementById('vitals-toggle-icon');
+        if (icon) icon.textContent = isCollapsed ? '🙈' : '👁️';
+      });
+    }
+
+    // Auto-close dock when selecting any action button on mobile
+    if (dockEl) {
+      dockEl.querySelectorAll('.dock-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          if (window.innerWidth <= 900) {
+            toggleMobileDock(false);
+          }
+        });
+      });
+    }
+
+    // Tap outside on game screen to close mobile drawers
+    window.addEventListener('pointerdown', (e) => {
+      if (window.innerWidth <= 900) {
+        if (!e.target.closest('#stardew-right-hud')) {
+          if (dockEl && dockEl.classList.contains('mobile-expanded')) {
+            toggleMobileDock(false);
+          }
+          if (cropsEl && cropsEl.classList.contains('mobile-expanded')) {
+            toggleMobileCrops(false);
+          }
+        }
+      }
+    });
 
     // Fullscreen Toggle
     document.getElementById('btn-toggle-fullscreen').addEventListener('click', () => {
