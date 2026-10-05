@@ -3,7 +3,9 @@
 
 class BackgroundMusicPlayer {
   constructor() {
-    this.audio = new Audio('/sounds/backgroundmusic.m4a');
+    const base = import.meta.env.BASE_URL || './';
+    const musicUrl = base.endsWith('/') ? `${base}sounds/backgroundmusic.m4a` : `${base}/sounds/backgroundmusic.m4a`;
+    this.audio = new Audio(musicUrl);
     this.audio.loop = true;
     this.audio.volume = 0.35;
     this.isPlaying = false;

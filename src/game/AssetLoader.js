@@ -7,11 +7,13 @@ export class AssetLoader {
   }
 
   loadAll() {
+    const base = import.meta.env.BASE_URL || './';
+    const b = base.endsWith('/') ? base : `${base}/`;
     const assetList = [
-      { name: 'buildings', src: '/assets/buildings.jpg' },
-      { name: 'animals', src: '/assets/animals.jpg' },
-      { name: 'farmer', src: '/assets/farmer.jpg' },
-      { name: 'crops', src: '/assets/crops.jpg' }
+      { name: 'buildings', src: `${b}assets/buildings.jpg` },
+      { name: 'animals', src: `${b}assets/animals.jpg` },
+      { name: 'farmer', src: `${b}assets/farmer.jpg` },
+      { name: 'crops', src: `${b}assets/crops.jpg` }
     ];
 
     const promises = assetList.map(asset => {
