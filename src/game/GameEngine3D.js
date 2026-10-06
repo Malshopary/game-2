@@ -109,6 +109,18 @@ export class GameEngine3D {
     this.initBuilderMode();
     this.loadFarmLayout();
 
+    // Dynamically refresh animal farm signboards whenever coins or level change
+    if (this.state && typeof this.state.onChange === 'function') {
+      this.state.onChange(() => {
+        this.refreshAnimalSigns();
+      });
+    }
+    if (typeof document !== 'undefined' && document.fonts && typeof document.fonts.ready?.then === 'function') {
+      document.fonts.ready.then(() => {
+        this.refreshAnimalSigns();
+      });
+    }
+
     this.isRunning = false;
     this.lastTime = performance.now();
     this.elapsedTime = 0;
@@ -679,13 +691,13 @@ export class GameEngine3D {
       coords.add(`${x},1`);
     }
 
-    // 3. West Pen Boardwalk: Along Western Animal Pens at X = -19, Z from -22 to 20
-    for (let z = -22; z <= 20; z += 2) {
+    // 3. West Pen Boardwalk: Along Western Animal Pens at X = -19, Z from -24 to 24
+    for (let z = -24; z <= 24; z += 2) {
       coords.add(`-19,${z}`);
     }
 
-    // 4. East Pen Boardwalk: Along Eastern Animal Pens at X = 19, Z from -22 to 14
-    for (let z = -22; z <= 14; z += 2) {
+    // 4. East Pen Boardwalk: Along Eastern Animal Pens at X = 19, Z from -24 to 24
+    for (let z = -24; z <= 24; z += 2) {
       coords.add(`19,${z}`);
     }
 
@@ -1903,7 +1915,7 @@ export class GameEngine3D {
   isInteractiveObject(obj) {
     if (!obj || !obj.userData) return false;
     const d = obj.userData;
-    return !!(d.isFarmer || d.rootFarmer || d.isPlot || d.isPlotPart || d.rootPlot || d.plotGroup || d.isLockTrigger || d.isExpansionSign || d.isPet || d.isTrough || d.isAnimal);
+    return !!(d.isFarmer || d.rootFarmer || d.isPlot || d.isPlotPart || d.rootPlot || d.plotGroup || d.isLockTrigger || d.isFarmSign || d.isExpansionSign || d.isPet || d.isTrough || d.isAnimal);
   }
 
   // ==========================================================
@@ -2226,33 +2238,36 @@ export class GameEngine3D {
   createSideAnimalZones() {
     this.animalZoneObjects = new Map();
     this.troughStations = new Map();
+    this.farmSignboards = new Map();
     this.animals3D = [];
 
+    // ==========================================================
+    // GOLDEN RATIO DIMENSIONS (φ ≈ 1.6180339887):
+    // Depth D = 9.0 units
+    // Width W = 9.0 * 1.6180339887 = 14.5623 ≈ 14.56 units
+    // Ratio W / D = 14.56 / 9.0 = 1.618 (The Golden Ratio)
+    // Area = 14.56 * 9.0 = 131.04 sq units
+    // Every single animal pen has the EXACT SAME size and proportions!
+    // Center-to-center spacing along Z = 12.5 (9.0 depth + 3.5 golden gap)
+    // ==========================================================
+    const GOLDEN_WIDTH = 14.56;
+    const GOLDEN_DEPTH = 9.0;
+
     // 1. WEST SIDE PENS (Chicken, Duck, Sheep, Rabbit)
-    // A. Chicken Coop & Scratch Yard (West Upper)
-    this.createZone('chicken', -27, -21, ANIMAL_FARMS.chicken, 14, 10, 'east');
-
-    // B. Duck Pond & Water Pen (West Mid)
-    this.createZone('duck', -27, -8, ANIMAL_FARMS.duck, 14, 10, 'east');
-
-    // C. Fluffy Sheep Meadow (West Lower)
-    this.createZone('sheep', -27, 6, ANIMAL_FARMS.sheep, 14, 10, 'east');
-
-    // D. Rabbit Garden & Warren (West Bottom)
-    this.createZone('rabbit', -27, 19, ANIMAL_FARMS.rabbit, 14, 10, 'east');
+    // Gates face East towards the Western Boardwalk at X = -19
+    this.createZone('chicken', -26.5, -18.75, ANIMAL_FARMS.chicken, GOLDEN_WIDTH, GOLDEN_DEPTH, 'east');
+    this.createZone('duck', -26.5, -6.25, ANIMAL_FARMS.duck, GOLDEN_WIDTH, GOLDEN_DEPTH, 'east');
+    this.createZone('sheep', -26.5, 6.25, ANIMAL_FARMS.sheep, GOLDEN_WIDTH, GOLDEN_DEPTH, 'east');
+    this.createZone('rabbit', -26.5, 18.75, ANIMAL_FARMS.rabbit, GOLDEN_WIDTH, GOLDEN_DEPTH, 'east');
 
     // 2. EAST SIDE PENS (Cow, Goat, Horse)
-    // E. Dairy Cow Pasture & Red Barn (East Upper)
-    this.createZone('cow', 27, -21, ANIMAL_FARMS.cow, 15, 11, 'west');
-
-    // F. Mountain Goat Hills (East Mid)
-    this.createZone('goat', 27, -8, ANIMAL_FARMS.goat, 14, 10, 'west');
-
-    // G. Royal Horse Stables & Paddock (East Lower)
-    this.createZone('horse', 27, 12, ANIMAL_FARMS.horse, 16, 15, 'west');
+    // Gates face West towards the Eastern Boardwalk at X = 19
+    this.createZone('cow', 26.5, -18.75, ANIMAL_FARMS.cow, GOLDEN_WIDTH, GOLDEN_DEPTH, 'west');
+    this.createZone('goat', 26.5, -6.25, ANIMAL_FARMS.goat, GOLDEN_WIDTH, GOLDEN_DEPTH, 'west');
+    this.createZone('horse', 26.5, 6.25, ANIMAL_FARMS.horse, GOLDEN_WIDTH, GOLDEN_DEPTH, 'west');
   }
 
-  createZone(type, posX, posZ, config, width = 14, depth = 10, gateSide = 'east') {
+  createZone(type, posX, posZ, config, width = 14.56, depth = 9.0, gateSide = 'east') {
     const group = new THREE.Group();
     group.position.set(posX, 0, posZ);
 
@@ -2261,10 +2276,11 @@ export class GameEngine3D {
     // Fences around the pen with opening gate facing the road
     this.create3DFencePerimeter(group, width, depth, isUnlocked, gateSide, posX, posZ);
 
-    if (!isUnlocked) {
-      const signGroup = this.createLockedSign(config, gateSide, width, depth);
-      group.add(signGroup);
-    } else {
+    // High-resolution artistic entrance signboard (Name, Cost, Level, Status)
+    const signGroup = this.createAnimalFarmSignboard(config, gateSide, width, depth, isUnlocked);
+    group.add(signGroup);
+
+    if (isUnlocked) {
       // Unlocked active pen: Shelter, Trough, and Animals!
       this.populateUnlockedFarm(group, type, posX, posZ, width, depth, gateSide);
     }
@@ -2383,39 +2399,406 @@ export class GameEngine3D {
     });
   }
 
-  createLockedSign(config, gateSide = 'east', width = 14, depth = 10) {
+  fillRoundedRect(ctx, x, y, width, height, radius) {
+    ctx.beginPath();
+    if (typeof ctx.roundRect === 'function') {
+      ctx.roundRect(x, y, width, height, radius);
+    } else {
+      ctx.rect(x, y, width, height);
+    }
+    ctx.fill();
+  }
+
+  strokeRoundedRect(ctx, x, y, width, height, radius) {
+    ctx.beginPath();
+    if (typeof ctx.roundRect === 'function') {
+      ctx.roundRect(x, y, width, height, radius);
+    } else {
+      ctx.rect(x, y, width, height);
+    }
+    ctx.stroke();
+  }
+
+  createAnimalFarmSignCanvas(config, isUnlocked) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 1024;
+    canvas.height = 512;
+    this.drawAnimalFarmSignOnCanvas(canvas, config, isUnlocked);
+    return canvas;
+  }
+
+  drawAnimalFarmSignOnCanvas(canvas, config, isUnlocked) {
+    const ctx = canvas.getContext('2d');
+    const w = canvas.width;
+    const h = canvas.height;
+    const playerLevel = this.state?.level || 1;
+    const playerCoins = this.state?.coins || 0;
+    const hasLevel = playerLevel >= config.minLevel;
+    const hasCoins = playerCoins >= config.cost;
+    const canBuy = hasLevel && hasCoins;
+
+    ctx.clearRect(0, 0, w, h);
+
+    // 1. Rustic Dark Oak Wood Planks Background
+    const woodGrad = ctx.createLinearGradient(0, 0, 0, h);
+    woodGrad.addColorStop(0, '#381c0c');
+    woodGrad.addColorStop(0.5, '#241106');
+    woodGrad.addColorStop(1, '#170a04');
+    ctx.fillStyle = woodGrad;
+    this.fillRoundedRect(ctx, 10, 10, w - 20, h - 20, 24);
+
+    // Horizontal wood plank lines with highlights
+    for (let y = 100; y < h - 20; y += 95) {
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.55)';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(15, y);
+      ctx.lineTo(w - 15, y);
+      ctx.stroke();
+
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(15, y + 2);
+      ctx.lineTo(w - 15, y + 2);
+      ctx.stroke();
+    }
+
+    // 2. Ornate Golden Outer Border with Corner Rivets
+    ctx.strokeStyle = isUnlocked ? '#22c55e' : (canBuy ? '#fbbf24' : '#d97706');
+    ctx.lineWidth = 8;
+    this.strokeRoundedRect(ctx, 18, 18, w - 36, h - 36, 20);
+
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
+    ctx.lineWidth = 2;
+    this.strokeRoundedRect(ctx, 24, 24, w - 48, h - 48, 16);
+
+    // Metallic golden corner studs
+    const rivets = [
+      [36, 36], [w - 36, 36], [36, h - 36], [w - 36, h - 36]
+    ];
+    rivets.forEach(([rx, ry]) => {
+      ctx.fillStyle = '#f59e0b';
+      ctx.beginPath();
+      ctx.arc(rx, ry, 9, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#78350f';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    });
+
+    // 3. Header Plaque: Farm Icon & Arabic Name
+    const headerGrad = ctx.createLinearGradient(0, 30, 0, 136);
+    if (isUnlocked) {
+      headerGrad.addColorStop(0, '#15803d');
+      headerGrad.addColorStop(1, '#052e16');
+    } else {
+      headerGrad.addColorStop(0, '#991b1b');
+      headerGrad.addColorStop(1, '#450a0a');
+    }
+    ctx.fillStyle = headerGrad;
+    this.fillRoundedRect(ctx, 40, 30, w - 80, 104, 18);
+
+    ctx.strokeStyle = isUnlocked ? '#86efac' : (canBuy ? '#fde047' : '#fca5a5');
+    ctx.lineWidth = 3;
+    this.strokeRoundedRect(ctx, 40, 30, w - 80, 104, 18);
+
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 44px "Cairo", "Segoe UI", sans-serif';
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.85)';
+    ctx.shadowBlur = 8;
+    ctx.shadowOffsetX = 2;
+    ctx.shadowOffsetY = 2;
+    ctx.fillText(`${config.icon || '🐾'}  ${config.name || 'مزرعة الحيوان'}`, w / 2, 70);
+
+    // Subtitle / Golden Ratio Tag
+    ctx.font = 'bold 20px "Cairo", "Segoe UI", sans-serif';
+    ctx.fillStyle = '#fef08a';
+    ctx.shadowBlur = 4;
+    const subtext = isUnlocked 
+      ? '✨ مزرعة نشطة ومنتجة • الأبعاد بالكامل بالنسبة الذهبية (φ = 1.618) 🌟'
+      : `🌟 الأبعاد: 14.56 × 9.0 (النسبة الذهبية φ = 1.618) • ${config.desc || ''}`;
+    ctx.fillText(subtext, w / 2, 110);
+
+    ctx.shadowColor = 'transparent';
+    ctx.shadowBlur = 0;
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = 0;
+
+    // 4. Content Cards
+    if (!isUnlocked) {
+      // CARD 1: Required Unlock Level (Left)
+      const cardAY = 152;
+      const cardAX = 50;
+      const cardAW = 445;
+      const cardAH = 186;
+
+      const levelGrad = ctx.createLinearGradient(cardAX, cardAY, cardAX, cardAY + cardAH);
+      levelGrad.addColorStop(0, hasLevel ? 'rgba(22, 101, 52, 0.9)' : 'rgba(127, 29, 29, 0.9)');
+      levelGrad.addColorStop(1, 'rgba(15, 23, 42, 0.95)');
+      ctx.fillStyle = levelGrad;
+      this.fillRoundedRect(ctx, cardAX, cardAY, cardAW, cardAH, 18);
+
+      ctx.strokeStyle = hasLevel ? '#4ade80' : '#ef4444';
+      ctx.lineWidth = 3;
+      this.strokeRoundedRect(ctx, cardAX, cardAY, cardAW, cardAH, 18);
+
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = 'bold 22px "Cairo", "Segoe UI", sans-serif';
+      ctx.fillText('⭐ المستوى المطلوب للشراء', cardAX + cardAW / 2, cardAY + 34);
+
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 46px "Cairo", "Segoe UI", sans-serif';
+      ctx.fillText(`المستوى ${config.minLevel}`, cardAX + cardAW / 2, cardAY + 90);
+
+      const pillAY = cardAY + 128;
+      ctx.fillStyle = hasLevel ? '#166534' : '#991b1b';
+      this.fillRoundedRect(ctx, cardAX + 24, pillAY, cardAW - 48, 44, 22);
+      ctx.fillStyle = hasLevel ? '#bbf7d0' : '#fecaca';
+      ctx.font = 'bold 21px "Cairo", "Segoe UI", sans-serif';
+      const levelStatusText = hasLevel 
+        ? `✅ متاح ومكتمل (مستواك: ${playerLevel})`
+        : `🔒 يتطلب مستوى ${config.minLevel} (مستواك: ${playerLevel})`;
+      ctx.fillText(levelStatusText, cardAX + cardAW / 2, pillAY + 22);
+
+      // CARD 2: Purchase Cost in Gold (Right)
+      const cardBX = 529;
+      const cardBY = 152;
+      const cardBW = 445;
+      const cardBH = 186;
+
+      const costGrad = ctx.createLinearGradient(cardBX, cardBY, cardBX, cardBY + cardBH);
+      costGrad.addColorStop(0, hasCoins ? 'rgba(133, 77, 14, 0.9)' : 'rgba(120, 53, 15, 0.9)');
+      costGrad.addColorStop(1, 'rgba(15, 23, 42, 0.95)');
+      ctx.fillStyle = costGrad;
+      this.fillRoundedRect(ctx, cardBX, cardBY, cardBW, cardBH, 18);
+
+      ctx.strokeStyle = hasCoins ? '#fbbf24' : '#f97316';
+      ctx.lineWidth = 3;
+      this.strokeRoundedRect(ctx, cardBX, cardBY, cardBW, cardBH, 18);
+
+      ctx.fillStyle = '#cbd5e1';
+      ctx.font = 'bold 22px "Cairo", "Segoe UI", sans-serif';
+      ctx.fillText('🪙 سعر شراء المزرعة', cardBX + cardBW / 2, cardBY + 34);
+
+      ctx.fillStyle = '#fde047';
+      ctx.font = 'bold 46px "Cairo", "Segoe UI", sans-serif';
+      ctx.fillText(`${config.cost.toLocaleString('ar-EG')} ذهب 🪙`, cardBX + cardBW / 2, cardBY + 90);
+
+      const pillBY = cardBY + 128;
+      ctx.fillStyle = hasCoins ? '#854d0e' : '#9a3412';
+      this.fillRoundedRect(ctx, cardBX + 24, pillBY, cardBW - 48, 44, 22);
+      ctx.fillStyle = hasCoins ? '#fef08a' : '#fed7aa';
+      ctx.font = 'bold 21px "Cairo", "Segoe UI", sans-serif';
+      const coinStatusText = hasCoins
+        ? `💰 الذهب كافٍ (معك: ${playerCoins.toLocaleString('ar-EG')})`
+        : `⚠️ ينقصك ${(config.cost - playerCoins).toLocaleString('ar-EG')} ذهب`;
+      ctx.fillText(coinStatusText, cardBX + cardBW / 2, pillBY + 22);
+
+      // BOTTOM BANNER / ACTION BUTTON
+      const btnX = 50;
+      const btnY = 356;
+      const btnW = 924;
+      const btnH = 114;
+
+      const btnGrad = ctx.createLinearGradient(btnX, btnY, btnX, btnY + btnH);
+      if (canBuy) {
+        btnGrad.addColorStop(0, '#f59e0b');
+        btnGrad.addColorStop(1, '#b45309');
+      } else if (!hasLevel) {
+        btnGrad.addColorStop(0, '#7f1d1d');
+        btnGrad.addColorStop(1, '#450a0a');
+      } else {
+        btnGrad.addColorStop(0, '#c2410c');
+        btnGrad.addColorStop(1, '#7c2d12');
+      }
+      ctx.fillStyle = btnGrad;
+      this.fillRoundedRect(ctx, btnX, btnY, btnW, btnH, 24);
+
+      ctx.strokeStyle = canBuy ? '#fef08a' : (hasLevel ? '#fb923c' : '#fca5a5');
+      ctx.lineWidth = 4;
+      this.strokeRoundedRect(ctx, btnX, btnY, btnW, btnH, 24);
+
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 32px "Cairo", "Segoe UI", sans-serif';
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.7)';
+      ctx.shadowBlur = 8;
+      ctx.shadowOffsetX = 2;
+      ctx.shadowOffsetY = 2;
+
+      if (canBuy) {
+        ctx.fillText('✨ انقر هنا لشراء وبناء المزرعة فوراً! 🔨🪙', w / 2, btnY + 44);
+        ctx.font = 'bold 22px "Cairo", "Segoe UI", sans-serif';
+        ctx.fillStyle = '#fef08a';
+        ctx.fillText('المس أو اضغط بالماوس للشراء وافتتاح الحظيرة وبدء الإنتاج', w / 2, btnY + 84);
+      } else if (!hasLevel) {
+        ctx.fillText(`🔒 مغلق! يجب الوصول إلى المستوى ${config.minLevel} لفتح الشراء ⭐`, w / 2, btnY + 44);
+        ctx.font = 'bold 22px "Cairo", "Segoe UI", sans-serif';
+        ctx.fillStyle = '#fecaca';
+        ctx.fillText(`ازرع واحصد المحاصيل للوصول إلى المستوى المطلوب (مستواك: ${playerLevel})`, w / 2, btnY + 84);
+      } else {
+        ctx.fillText(`🪙 الذهب غير كافٍ! ينقصك ${(config.cost - playerCoins).toLocaleString('ar-EG')} ذهب للشراء`, w / 2, btnY + 44);
+        ctx.font = 'bold 22px "Cairo", "Segoe UI", sans-serif';
+        ctx.fillStyle = '#fed7aa';
+        ctx.fillText('قم بحصاد وبيع المحاصيل لجمع الذهب المطلوب ثم عد للشراء', w / 2, btnY + 84);
+      }
+    } else {
+      // Unlocked Active Pen Banner
+      const cardX = 50;
+      const cardY = 152;
+      const cardW = 924;
+      const cardH = 318;
+
+      const unlGrad = ctx.createLinearGradient(cardX, cardY, cardX, cardY + cardH);
+      unlGrad.addColorStop(0, 'rgba(20, 83, 45, 0.9)');
+      unlGrad.addColorStop(1, 'rgba(6, 78, 59, 0.95)');
+      ctx.fillStyle = unlGrad;
+      this.fillRoundedRect(ctx, cardX, cardY, cardW, cardH, 20);
+
+      ctx.strokeStyle = '#4ade80';
+      ctx.lineWidth = 4;
+      this.strokeRoundedRect(ctx, cardX, cardY, cardW, cardH, 20);
+
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 36px "Cairo", "Segoe UI", sans-serif';
+      ctx.fillText('🏡 حظيرة نشطة ومكتملة البناء', w / 2, cardY + 68);
+
+      ctx.font = 'bold 26px "Cairo", "Segoe UI", sans-serif';
+      ctx.fillStyle = '#fef08a';
+      ctx.fillText(`🌾 اضغط على حوض المعلفة لإطعام ورعاية الحيوانات`, w / 2, cardY + 135);
+
+      ctx.font = 'bold 24px "Cairo", "Segoe UI", sans-serif';
+      ctx.fillStyle = '#bbf7d0';
+      ctx.fillText('🥚🥛 تنتج الحيوانات الموارد الطازجة بانتظام!', w / 2, cardY + 200);
+
+      this.fillRoundedRect(ctx, cardX + 160, cardY + 242, cardW - 320, 50, 25);
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 22px "Cairo", "Segoe UI", sans-serif';
+      ctx.fillText('🌟 الأبعاد مطابقة تماماً للنسبة الذهبية (14.56 × 9.0) 🌟', w / 2, cardY + 268);
+    }
+  }
+
+  createAnimalFarmSignboard(config, gateSide = 'east', width = 14.56, depth = 9.0, isUnlocked = false) {
     const group = new THREE.Group();
     const hw = width / 2;
-    const hd = depth / 2;
-    const signX = gateSide === 'east' ? (hw - 0.5) : (-hw + 0.5);
+    const signX = gateSide === 'east' ? (hw - 0.2) : (-hw + 0.2);
     group.position.set(signX, 0, 0);
 
-    // Wooden Construction Barrier & Signpost
-    const postMat = new THREE.MeshLambertMaterial({ color: '#78350f' });
-    const p1 = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 2.2, 8), postMat);
-    p1.position.set(0, 1.1, -1.2);
+    const postMat = new THREE.MeshLambertMaterial({ color: '#5c2d16' });
+    const beamMat = new THREE.MeshLambertMaterial({ color: '#451a03' });
+    const goldMat = new THREE.MeshStandardMaterial({ color: '#fbbf24', roughness: 0.3, metalness: 0.8 });
+    const metalMat = new THREE.MeshStandardMaterial({ color: '#64748b', roughness: 0.4, metalness: 0.7 });
+
+    const postHeight = isUnlocked ? 3.3 : 2.6;
+    const p1 = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.14, postHeight, 8), postMat);
+    p1.position.set(0, postHeight / 2, -1.6);
     p1.castShadow = true;
     group.add(p1);
 
     const p2 = p1.clone();
-    p2.position.set(0, 1.1, 1.2);
+    p2.position.set(0, postHeight / 2, 1.6);
     group.add(p2);
 
-    // Red striped barrier board
-    const boardMat = new THREE.MeshLambertMaterial({ color: '#b91c1c' });
-    const board = new THREE.Mesh(new THREE.BoxGeometry(0.15, 1.1, 3.0), boardMat);
-    board.position.set(0, 1.5, 0);
-    board.castShadow = true;
-    group.add(board);
+    // Cross beam on top
+    const beam = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.22, 3.5), beamMat);
+    beam.position.set(0, postHeight + 0.05, 0);
+    beam.castShadow = true;
+    group.add(beam);
 
-    // Lock icon / sphere
-    const lockMat = new THREE.MeshLambertMaterial({ color: '#fbbf24' });
-    const lock = new THREE.Mesh(new THREE.SphereGeometry(0.35, 10, 10), lockMat);
-    lock.position.set(0, 2.3, 0);
-    group.add(lock);
+    // Main sign board frame
+    const boardY = isUnlocked ? 2.4 : 1.55;
+    const boardFrame = new THREE.Mesh(new THREE.BoxGeometry(0.14, 1.52, 3.22), beamMat);
+    boardFrame.position.set(0, boardY, 0);
+    boardFrame.castShadow = true;
+    group.add(boardFrame);
 
-    group.userData = { isLockTrigger: true, farmType: config.id, config };
+    // Canvas Texture on Front (+X) and Back (-X) faces
+    const canvas = this.createAnimalFarmSignCanvas(config, isUnlocked);
+    const texture = new THREE.CanvasTexture(canvas);
+    if (THREE.SRGBColorSpace) texture.colorSpace = THREE.SRGBColorSpace;
+    const faceMat = new THREE.MeshBasicMaterial({ map: texture });
+
+    // Front Face (Faces +X towards Road for West pens)
+    const frontPlane = new THREE.Mesh(new THREE.PlaneGeometry(3.18, 1.48), faceMat);
+    frontPlane.position.set(0.076, boardY, 0);
+    frontPlane.rotation.y = Math.PI / 2;
+    group.add(frontPlane);
+
+    // Back Face (Faces -X towards Road for East pens)
+    const backPlane = new THREE.Mesh(new THREE.PlaneGeometry(3.18, 1.48), faceMat);
+    backPlane.position.set(-0.076, boardY, 0);
+    backPlane.rotation.y = -Math.PI / 2;
+    group.add(backPlane);
+
+    // Top Ornaments
+    if (!isUnlocked) {
+      // 3D Padlock & Golden Coin
+      const lockBase = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.38, 0.44), goldMat);
+      lockBase.position.set(0, boardY + 0.95, 0);
+      lockBase.castShadow = true;
+      group.add(lockBase);
+
+      const shackle = new THREE.Mesh(new THREE.TorusGeometry(0.16, 0.045, 8, 16, Math.PI), metalMat);
+      shackle.position.set(0, boardY + 1.15, 0);
+      shackle.rotation.y = Math.PI / 2;
+      group.add(shackle);
+
+      // Rotating Golden Coin
+      const coin = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 0.08, 16), goldMat);
+      coin.position.set(0, boardY + 1.55, 0);
+      coin.rotation.z = Math.PI / 2;
+      coin.castShadow = true;
+      group.add(coin);
+    } else {
+      // Golden Horseshoe / Clover Emblem
+      const emblem = new THREE.Mesh(new THREE.TorusGeometry(0.24, 0.06, 8, 16, Math.PI * 1.5), goldMat);
+      emblem.position.set(0, boardY + 0.95, 0);
+      emblem.rotation.y = Math.PI / 2;
+      emblem.rotation.z = Math.PI / 4;
+      group.add(emblem);
+    }
+
+    const signData = {
+      isLockTrigger: !isUnlocked,
+      isFarmSign: true,
+      farmType: config.id,
+      config,
+      isUnlocked,
+      canvas,
+      texture,
+      frontPlane,
+      backPlane,
+      group
+    };
+
+    group.userData = signData;
+    group.traverse(c => {
+      c.userData = {
+        isLockTrigger: !isUnlocked,
+        isFarmSign: true,
+        farmType: config.id,
+        config,
+        isUnlocked,
+        rootSign: group
+      };
+    });
+
+    if (!this.farmSignboards) this.farmSignboards = new Map();
+    this.farmSignboards.set(config.id, signData);
+
     return group;
+  }
+
+  refreshAnimalSigns() {
+    if (!this.farmSignboards) return;
+    this.farmSignboards.forEach((signData) => {
+      if (signData && signData.canvas && signData.texture) {
+        this.drawAnimalFarmSignOnCanvas(signData.canvas, signData.config, signData.isUnlocked);
+        signData.texture.needsUpdate = true;
+      }
+    });
   }
 
   unlockAnimalFarm(type) {
@@ -2445,17 +2828,18 @@ export class GameEngine3D {
     confetti({ particleCount: 60, spread: 90, origin: { x: 0.5, y: 0.5 } });
     this.particles.addFloatingText(`تهانينا! تم بناء ${config.name}! 🎉`, 0, 25, '#ffd166', 22);
 
-    // Rebuild the zone in unlocked state
+    // Rebuild the zone in unlocked state with Golden Ratio dimensions
     const oldZone = this.animalZoneObjects.get(type);
     if (oldZone) {
       const pos = oldZone.position.clone();
       const u = oldZone.userData;
       this.scene.remove(oldZone);
-      this.createZone(type, pos.x, pos.z, config, u.width || 14, u.depth || 10, u.gateSide || 'east');
+      this.createZone(type, pos.x, pos.z, config, u.width || 14.56, u.depth || 9.0, u.gateSide || 'east');
     }
+    this.refreshAnimalSigns();
   }
 
-  populateUnlockedFarm(group, type, posX, posZ, width = 14, depth = 10, gateSide = 'east') {
+  populateUnlockedFarm(group, type, posX, posZ, width = 14.56, depth = 9.0, gateSide = 'east') {
     const hw = width / 2;
     const hd = depth / 2;
 
@@ -2836,7 +3220,7 @@ export class GameEngine3D {
     }
   }
 
-  create3DFencePerimeter(parentGroup, width, depth, isUnlocked, gateSide = 'east', worldX = 0, worldZ = 0) {
+  create3DFencePerimeter(parentGroup, width = 14.56, depth = 9.0, isUnlocked = false, gateSide = 'east', worldX = 0, worldZ = 0) {
     const postMat = new THREE.MeshLambertMaterial({ color: isUnlocked ? '#92400e' : '#78350f' });
     const railMat = new THREE.MeshLambertMaterial({ color: isUnlocked ? '#b45309' : '#9a3412' });
 
@@ -2867,14 +3251,36 @@ export class GameEngine3D {
       parentGroup.add(r2);
     };
 
-    // Posts along 4 edges (leave gate gap)
-    for (let x = -hw; x <= hw; x += 3.0) {
+    // Evenly spaced posts along North (-hd) and South (hd) edges (5 equal segments across 14.56 width)
+    for (let i = 0; i <= 5; i++) {
+      const x = -hw + (i * (2 * hw)) / 5;
       addPost(x, -hd);
       addPost(x, hd);
     }
-    for (let z = -hd; z <= hd; z += 3.0) {
-      if (gateSide !== 'west' || Math.abs(z) > 1.8) addPost(-hw, z);
-      if (gateSide !== 'east' || Math.abs(z) > 1.8) addPost(hw, z);
+
+    // Posts along West (-hw) and East (hw) edges
+    for (let j = 0; j <= 3; j++) {
+      const z = -hd + (j * (2 * hd)) / 3;
+      if (gateSide !== 'west') {
+        addPost(-hw, z);
+      }
+      if (gateSide !== 'east') {
+        addPost(hw, z);
+      }
+    }
+
+    // Dedicated gate entrance posts on gate side
+    if (gateSide === 'west') {
+      addPost(-hw, -hd);
+      addPost(-hw, -1.6);
+      addPost(-hw, 1.6);
+      addPost(-hw, hd);
+    }
+    if (gateSide === 'east') {
+      addPost(hw, -hd);
+      addPost(hw, -1.6);
+      addPost(hw, 1.6);
+      addPost(hw, hd);
     }
 
     // North and South closed rails
@@ -2883,16 +3289,16 @@ export class GameEngine3D {
 
     // West rail
     if (gateSide === 'west') {
-      addRail(-hw, -hd, -hw, -1.8);
-      addRail(-hw, 1.8, -hw, hd);
+      addRail(-hw, -hd, -hw, -1.6);
+      addRail(-hw, 1.6, -hw, hd);
     } else {
       addRail(-hw, -hd, -hw, hd);
     }
 
     // East rail
     if (gateSide === 'east') {
-      addRail(hw, -hd, hw, -1.8);
-      addRail(hw, 1.8, hw, hd);
+      addRail(hw, -hd, hw, -1.6);
+      addRail(hw, 1.6, hw, hd);
     } else {
       addRail(hw, -hd, hw, hd);
     }
@@ -2907,15 +3313,27 @@ export class GameEngine3D {
       if (gateSide === 'west') {
         // East fence solid
         this.staticColliders.push({ type: 'box', minX: worldX + hw - 0.3, maxX: worldX + hw + 0.3, minZ: worldZ - hd, maxZ: worldZ + hd });
-        // West fence has gate opening between -1.8 and +1.8
-        this.staticColliders.push({ type: 'box', minX: worldX - hw - 0.3, maxX: worldX - hw + 0.3, minZ: worldZ - hd, maxZ: worldZ - 1.8 });
-        this.staticColliders.push({ type: 'box', minX: worldX - hw - 0.3, maxX: worldX - hw + 0.3, minZ: worldZ + 1.8, maxZ: worldZ + hd });
+        // West fence has gate opening between -1.6 and +1.6
+        this.staticColliders.push({ type: 'box', minX: worldX - hw - 0.3, maxX: worldX - hw + 0.3, minZ: worldZ - hd, maxZ: worldZ - 1.6 });
+        this.staticColliders.push({ type: 'box', minX: worldX - hw - 0.3, maxX: worldX - hw + 0.3, minZ: worldZ + 1.6, maxZ: worldZ + hd });
       } else {
         // West fence solid
         this.staticColliders.push({ type: 'box', minX: worldX - hw - 0.3, maxX: worldX - hw + 0.3, minZ: worldZ - hd, maxZ: worldZ + hd });
-        // East fence has gate opening between -1.8 and +1.8
-        this.staticColliders.push({ type: 'box', minX: worldX + hw - 0.3, maxX: worldX + hw + 0.3, minZ: worldZ - hd, maxZ: worldZ - 1.8 });
-        this.staticColliders.push({ type: 'box', minX: worldX + hw - 0.3, maxX: worldX + hw + 0.3, minZ: worldZ + 1.8, maxZ: worldZ + hd });
+        // East fence has gate opening between -1.6 and +1.6
+        this.staticColliders.push({ type: 'box', minX: worldX + hw - 0.3, maxX: worldX + hw + 0.3, minZ: worldZ - hd, maxZ: worldZ - 1.6 });
+        this.staticColliders.push({ type: 'box', minX: worldX + hw - 0.3, maxX: worldX + hw + 0.3, minZ: worldZ + 1.6, maxZ: worldZ + hd });
+      }
+
+      // If pen is locked, sign blocks gate opening
+      if (!isUnlocked) {
+        const gateX = gateSide === 'west' ? (worldX - hw) : (worldX + hw);
+        this.staticColliders.push({
+          type: 'box',
+          minX: gateX - 0.4,
+          maxX: gateX + 0.4,
+          minZ: worldZ - 1.6,
+          maxZ: worldZ + 1.6
+        });
       }
     }
   }
@@ -5846,20 +6264,32 @@ export class GameEngine3D {
         const u = group.userData;
         const worldX = group.position.x;
         const worldZ = group.position.z;
-        const hw = (u.width || 14) / 2;
-        const hd = (u.depth || 10) / 2;
+        const hw = (u.width || 14.56) / 2;
+        const hd = (u.depth || 9.0) / 2;
 
         this.staticColliders.push({ type: 'box', minX: worldX - hw - 0.2, maxX: worldX + hw + 0.2, minZ: worldZ - hd - 0.3, maxZ: worldZ - hd + 0.3 });
         this.staticColliders.push({ type: 'box', minX: worldX - hw - 0.2, maxX: worldX + hw + 0.2, minZ: worldZ + hd - 0.3, maxZ: worldZ + hd + 0.3 });
 
         if (u.gateSide === 'west') {
           this.staticColliders.push({ type: 'box', minX: worldX + hw - 0.3, maxX: worldX + hw + 0.3, minZ: worldZ - hd, maxZ: worldZ + hd });
-          this.staticColliders.push({ type: 'box', minX: worldX - hw - 0.3, maxX: worldX - hw + 0.3, minZ: worldZ - hd, maxZ: worldZ - 1.8 });
-          this.staticColliders.push({ type: 'box', minX: worldX - hw - 0.3, maxX: worldX - hw + 0.3, minZ: worldZ + 1.8, maxZ: worldZ + hd });
+          this.staticColliders.push({ type: 'box', minX: worldX - hw - 0.3, maxX: worldX - hw + 0.3, minZ: worldZ - hd, maxZ: worldZ - 1.6 });
+          this.staticColliders.push({ type: 'box', minX: worldX - hw - 0.3, maxX: worldX - hw + 0.3, minZ: worldZ + 1.6, maxZ: worldZ + hd });
         } else {
           this.staticColliders.push({ type: 'box', minX: worldX - hw - 0.3, maxX: worldX - hw + 0.3, minZ: worldZ - hd, maxZ: worldZ + hd });
-          this.staticColliders.push({ type: 'box', minX: worldX + hw - 0.3, maxX: worldX + hw + 0.3, minZ: worldZ - hd, maxZ: worldZ - 1.8 });
-          this.staticColliders.push({ type: 'box', minX: worldX + hw - 0.3, maxX: worldX + hw + 0.3, minZ: worldZ + 1.8, maxZ: worldZ + hd });
+          this.staticColliders.push({ type: 'box', minX: worldX + hw - 0.3, maxX: worldX + hw + 0.3, minZ: worldZ - hd, maxZ: worldZ - 1.6 });
+          this.staticColliders.push({ type: 'box', minX: worldX + hw - 0.3, maxX: worldX + hw + 0.3, minZ: worldZ + 1.6, maxZ: worldZ + hd });
+        }
+
+        // If pen is locked, sign blocks the gate opening
+        if (!u.isUnlocked) {
+          const gateX = u.gateSide === 'west' ? (worldX - hw) : (worldX + hw);
+          this.staticColliders.push({
+            type: 'box',
+            minX: gateX - 0.4,
+            maxX: gateX + 0.4,
+            minZ: worldZ - 1.6,
+            maxZ: worldZ + 1.6
+          });
         }
       });
     }
@@ -5940,13 +6370,26 @@ export class GameEngine3D {
       }
     }
 
-    // 4. Restore Animal Zones Positions
+    // 4. Restore Animal Zones Positions (Migrate legacy positions to Golden Ratio layout)
     if (layout.animalZones && this.animalZoneObjects) {
+      const defaultGoldenZones = {
+        chicken: { x: -26.5, z: -18.75 },
+        duck: { x: -26.5, z: -6.25 },
+        sheep: { x: -26.5, z: 6.25 },
+        rabbit: { x: -26.5, z: 18.75 },
+        cow: { x: 26.5, z: -18.75 },
+        goat: { x: 26.5, z: -6.25 },
+        horse: { x: 26.5, z: 6.25 }
+      };
       for (const [type, pos] of Object.entries(layout.animalZones)) {
         const group = this.animalZoneObjects.get(type);
         if (group && pos) {
-          group.position.set(pos.x, 0, pos.z);
-          this.updateAnimalZoneAfterMove(group, pos.x, pos.z);
+          const defPos = defaultGoldenZones[type];
+          const isLegacy = Math.abs(pos.x) === 27 || Math.abs(pos.z) === 21 || Math.abs(pos.z) === 8 || Math.abs(pos.z) === 6 || Math.abs(pos.z) === 19 || Math.abs(pos.z) === 12;
+          const targetX = (isLegacy && defPos) ? defPos.x : pos.x;
+          const targetZ = (isLegacy && defPos) ? defPos.z : pos.z;
+          group.position.set(targetX, 0, targetZ);
+          this.updateAnimalZoneAfterMove(group, targetX, targetZ);
         }
       }
     }
@@ -5987,15 +6430,15 @@ export class GameEngine3D {
       });
     }
 
-    // Reset default animal zones
+    // Reset default animal zones with Golden Ratio coordinates
     const defaultZones = {
-      chicken: { x: -27, z: -21 },
-      duck: { x: -27, z: -8 },
-      sheep: { x: -27, z: 6 },
-      rabbit: { x: -27, z: 19 },
-      cow: { x: 27, z: -21 },
-      goat: { x: 27, z: -8 },
-      horse: { x: 27, z: 12 }
+      chicken: { x: -26.5, z: -18.75 },
+      duck: { x: -26.5, z: -6.25 },
+      sheep: { x: -26.5, z: 6.25 },
+      rabbit: { x: -26.5, z: 18.75 },
+      cow: { x: 26.5, z: -18.75 },
+      goat: { x: 26.5, z: -6.25 },
+      horse: { x: 26.5, z: 6.25 }
     };
     if (this.animalZoneObjects) {
       for (const [type, pos] of Object.entries(defaultZones)) {
@@ -7271,9 +7714,15 @@ export class GameEngine3D {
       return;
     }
 
-    // 2. Locked Animal Farm Clicked -> Unlock/Build it!
-    if (data.isLockTrigger) {
-      this.unlockAnimalFarm(data.farmType);
+    // 2. Animal Farm Signpost Clicked -> Unlock/Build or Show Info!
+    if (data.isLockTrigger || data.isFarmSign) {
+      if (data.isUnlocked) {
+        sounds.click();
+        const cfg = data.config || ANIMAL_FARMS[data.farmType];
+        this.particles.addFloatingText(`${cfg?.icon || '🏡'} ${cfg?.name || 'مزرعة'} (نشطة ومنتجة ✨)`, this.hoveredObject?.position?.x || 0, 25, '#4ade80', 22);
+      } else {
+        this.unlockAnimalFarm(data.farmType);
+      }
       return;
     }
 
@@ -8633,6 +9082,7 @@ export class GameEngine3D {
           obj &&
           !obj.userData.isPlot &&
           !obj.userData.isLockTrigger &&
+          !obj.userData.isFarmSign &&
           !obj.userData.isExpansionSign &&
           !obj.userData.isPet &&
           !obj.userData.isTrough &&
@@ -8657,6 +9107,7 @@ export class GameEngine3D {
         obj.userData &&
         (obj.userData.isPlot ||
           obj.userData.isLockTrigger ||
+          obj.userData.isFarmSign ||
           obj.userData.isExpansionSign ||
           obj.userData.isPet ||
           obj.userData.isTrough ||
