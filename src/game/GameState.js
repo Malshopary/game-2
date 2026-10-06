@@ -68,6 +68,8 @@ export class GameState {
     // Hotbar (10 Items) - Hoe, Water, Scythe, 12 Corn Seeds
     this.hotbar = JSON.parse(JSON.stringify(HOTBAR_ITEMS));
     this.selectedSlot = 0;
+    this.activeTool = 'hoe'; // Default active tool: 'hoe' | 'water' | 'plant' | 'harvest'
+    this.selectedSeed = 'corn'; // Default active seed: 'corn'
 
     // Extra Storage Backpack (Empty on new game)
     this.inventory = {};
@@ -171,6 +173,13 @@ export class GameState {
       // Bonus Coins on Level Up
       const bonusGold = this.level * 100;
       this.coins += bonusGold;
+
+      // Award bonus starter seeds for newly unlocked crops at this level
+      Object.values(CROPS).forEach(crop => {
+        if (crop.minLevel === this.level) {
+          this.addItem(crop.id, 8);
+        }
+      });
 
       if (this.onLevelUpCallback) {
         this.onLevelUpCallback(this.level, this.farmingSkill, bonusGold);
@@ -543,7 +552,9 @@ export class GameState {
         farmCustomLayout: this.farmCustomLayout || null,
         quests: this.quests,
         merchantOrders: this.merchantOrders,
-        stats: this.stats
+        stats: this.stats,
+        activeTool: this.activeTool,
+        selectedSeed: this.selectedSeed
       };
       localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
     } catch (e) {
@@ -559,6 +570,8 @@ export class GameState {
         this.coins = data.coins ?? this.coins;
         this.level = data.level ?? this.level;
         this.xp = data.xp ?? this.xp;
+        this.activeTool = data.activeTool || this.activeTool;
+        this.selectedSeed = data.selectedSeed || this.selectedSeed;
         this.energy = data.energy ?? this.energy;
         this.health = data.health ?? this.health;
         this.farmingSkill = data.farmingSkill ?? this.farmingSkill;

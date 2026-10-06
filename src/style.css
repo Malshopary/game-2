@@ -778,17 +778,6 @@ body, html {
   box-shadow: 0 0 14px rgba(100, 116, 139, 0.7);
 }
 
-.farm-action-btn.arrange {
-  background: linear-gradient(180deg, #ede9fe 0%, #8b5cf6 100%);
-  color: #2e1065;
-}
-.farm-action-btn.arrange.active {
-  background: linear-gradient(180deg, #a78bfa 0%, #6d28d9 100%);
-  color: #ffffff;
-  outline: 3px solid #c4b5fd;
-  box-shadow: 0 0 14px rgba(139, 92, 246, 0.7);
-}
-
 .act-icon {
   font-size: 16px;
   line-height: 1;
@@ -835,10 +824,37 @@ body, html {
 }
 
 .stardew-slot.active {
-  border: 3px solid #dc2626;
-  outline: 2px solid #ef4444;
+  border: 3px solid #16a34a !important;
+  outline: 2px solid #4ade80 !important;
   transform: translateY(-4px);
-  background: #fff8eb;
+  background: #f0fdf4 !important;
+  box-shadow: 0 0 14px rgba(34, 197, 94, 0.7);
+}
+
+.stardew-slot.locked-slot {
+  opacity: 0.52;
+  background: #3f2a18;
+  border-color: #2b1706;
+  cursor: pointer;
+  filter: grayscale(0.7);
+}
+
+.stardew-slot.locked-slot:hover {
+  transform: translateY(-1px);
+  background: #4a3420;
+}
+
+.stardew-slot.locked-slot .slot-icon {
+  opacity: 0.45;
+  filter: blur(0.5px);
+}
+
+.slot-lock-badge {
+  position: absolute;
+  bottom: 2px;
+  right: 3px;
+  font-size: 11px;
+  line-height: 1;
 }
 
 .slot-num {
@@ -865,6 +881,11 @@ body, html {
   font-weight: 900;
   color: #2b1807;
   font-family: 'Outfit', sans-serif;
+}
+
+.slot-stack.zero-stock {
+  color: #c2410c;
+  font-size: 9.5px;
 }
 
 /* ========================================================
@@ -2241,73 +2262,124 @@ body, html {
   box-shadow: 0 0 12px rgba(245, 158, 11, 0.65);
 }
 
-/* Virtual D-Pad for Direct Character Movement */
-.virtual-dpad {
+/* ========================================================
+   FARMER FLOATING SPEECH BUBBLE & CHAT BOX
+   ======================================================== */
+.farmer-speech-box {
   position: absolute;
-  bottom: 18px;
-  left: 18px;
-  width: 108px;
-  height: 108px;
-  z-index: 25;
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  grid-template-rows: repeat(3, 1fr);
-  gap: 3px;
+  transform: translate(-50%, -100%) translateY(-16px);
+  z-index: 125;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: linear-gradient(135deg, rgba(38, 22, 10, 0.94) 0%, rgba(56, 32, 14, 0.96) 100%);
+  border: 2px solid #f59e0b;
+  border-radius: 16px;
+  padding: 8px 14px;
+  max-width: 320px;
+  min-width: 190px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6), 0 0 14px rgba(245, 158, 11, 0.35);
   pointer-events: auto;
+  cursor: pointer;
+  direction: rtl;
+  text-align: right;
+  font-family: 'Cairo', 'Outfit', sans-serif;
   user-select: none;
   -webkit-user-select: none;
-  background: rgba(43, 24, 7, 0.75);
-  border: 2.5px solid var(--wood-dark);
-  border-radius: 14px;
-  padding: 4px;
-  backdrop-filter: blur(4px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  transition: opacity 0.28s ease, transform 0.28s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
-.virtual-dpad.hidden {
-  display: none !important;
-}
-
-.dpad-btn {
-  background: linear-gradient(135deg, #eac58f 0%, #d89b53 100%);
-  border: 2px solid var(--wood-dark);
-  border-radius: 8px;
-  color: #2b1807;
-  font-size: 13px;
-  font-weight: 900;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.4);
-  transition: all 0.1s;
-  outline: none;
-}
-
-.dpad-btn:hover {
-  filter: brightness(1.15);
-}
-
-.dpad-btn:active,
-.dpad-btn.pressed {
-  background: #fde047;
-  transform: scale(0.92);
-  border-color: #713f12;
-}
-
-.dpad-btn.up { grid-column: 2; grid-row: 1; }
-.dpad-btn.left { grid-column: 1; grid-row: 2; }
-.dpad-btn.right { grid-column: 3; grid-row: 2; }
-.dpad-btn.down { grid-column: 2; grid-row: 3; }
-
-.dpad-center {
-  grid-column: 2;
-  grid-row: 2;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 16px;
+.farmer-speech-box.hidden {
+  opacity: 0;
   pointer-events: none;
+  transform: translate(-50%, -100%) translateY(-6px) scale(0.85);
+}
+
+.farmer-speech-box.visible {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translate(-50%, -100%) translateY(-16px) scale(1);
+}
+
+.speech-avatar-bubble {
+  font-size: 1.85rem;
+  background: rgba(245, 158, 11, 0.18);
+  border: 1.5px solid rgba(245, 158, 11, 0.5);
+  border-radius: 50%;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  animation: speechAvatarBob 2.4s ease-in-out infinite;
+}
+
+.speech-bubble-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.speech-bubble-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.speech-farmer-title {
+  font-size: 0.78rem;
+  font-weight: 800;
+  color: #fbbf24;
+  letter-spacing: 0.5px;
+}
+
+.speech-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #10b981;
+  box-shadow: 0 0 6px #10b981;
+}
+
+.speech-bubble-text {
+  font-size: 0.92rem;
+  color: #fef3c7;
+  line-height: 1.4;
+  font-weight: 600;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
+  word-break: break-word;
+}
+
+.speech-tail {
+  position: absolute;
+  bottom: -9px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border-left: 9px solid transparent;
+  border-right: 9px solid transparent;
+  border-top: 10px solid #f59e0b;
+}
+
+.speech-tail::after {
+  content: '';
+  position: absolute;
+  bottom: 2px;
+  left: -7px;
+  width: 0;
+  height: 0;
+  border-left: 7px solid transparent;
+  border-right: 7px solid transparent;
+  border-top: 8px solid rgba(56, 32, 14, 0.96);
+}
+
+@keyframes speechAvatarBob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-3px); }
 }
 
 @keyframes pulse-move-btn {
@@ -2674,12 +2746,7 @@ body, html {
     padding: 4px 10px;
     font-size: 12px;
   }
-  .virtual-dpad {
-    bottom: 90px;
-    left: 12px;
-    width: 96px;
-    height: 96px;
-  }
+
 }
 
 /* 2. Mobile Devices and Tablets in Portrait (<= 900px) */
@@ -3054,27 +3121,7 @@ body, html {
     right: 2px;
   }
 
-  /* G. Virtual D-Pad: Positioned for Left Thumb, Above Hotbar */
-  .virtual-dpad {
-    bottom: 84px;
-    left: 8px;
-    width: 86px;
-    height: 86px;
-    padding: 2px;
-    gap: 2px;
-    border-radius: 10px;
-    background: rgba(30, 16, 7, 0.85);
-    border-width: 2px;
-  }
 
-  .dpad-btn {
-    font-size: 11px;
-    border-radius: 6px;
-  }
-
-  .dpad-center {
-    font-size: 13px;
-  }
 
   /* H. Modals on Mobile */
   .modal-card {
@@ -3116,11 +3163,18 @@ body, html {
     font-size: 10px;
   }
 
-  .virtual-dpad {
-    width: 78px;
-    height: 78px;
-    bottom: 82px;
-    left: 6px;
+  .farmer-speech-box {
+    max-width: 250px;
+    padding: 6px 10px;
+    gap: 8px;
+  }
+  .speech-avatar-bubble {
+    width: 32px;
+    height: 32px;
+    font-size: 1.4rem;
+  }
+  .speech-bubble-text {
+    font-size: 0.82rem;
   }
 }
 

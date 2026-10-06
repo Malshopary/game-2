@@ -56,8 +56,27 @@ export class GameEngine3D {
     this.isPlacingNewPlotMode = false;
     this.plotPlacementGhost = null;
 
-    // Explicit Character Walk Mode (Farmer doesn't walk unless this mode is chosen or WASD/Arrows used)
-    this.isFarmerWalkMode = false;
+    // Touch & Drag Panning System for Mobile, Tablet and Desktop
+    this.panVelocity = new THREE.Vector2(0, 0);
+    this.touchPanActive = false;
+    this.touchStartX = 0;
+    this.touchStartY = 0;
+    this.touchLastX = 0;
+    this.touchLastY = 0;
+    this.touchStartTime = 0;
+    this.touchTotalDist = 0;
+    this.isTouchDraggingFarm = false;
+    this.isPinchZooming = false;
+    this.pinchStartDist = 0;
+    this.pinchStartFrustum = 34;
+    this.pinchStartDistance = 32;
+    this.mouseDragPanActive = false;
+    this.mouseDragLastX = 0;
+    this.mouseDragLastY = 0;
+
+    // Autonomous Farmer AI and Speech System
+    this.initFarmerAutonomousAI();
+    this.initFarmerSpeech();
 
     // Modular Road Squares & Road Edit System (Move, Erase, Add)
     this.roadTiles = new Map();
@@ -260,6 +279,10 @@ export class GameEngine3D {
     this.cursorFrameMesh = frameMesh;
     this.cursorGlowMesh = glowMesh;
     this.scene.add(cursorGroup);
+
+    // Active tool and selected seed state (Controlled via top action bar & bottom seed bar)
+    this.activeTool = 'hoe';
+    this.selectedSeed = 'corn';
 
     // Initialize procedural realistic textures (Cow hide, flannel, denim)
     this.initProceduralTextures();
@@ -843,7 +866,6 @@ export class GameEngine3D {
     if (this.isRoadEditMode) {
       if (this.isPlacingNewPlotMode) this.stopPlacingNewPlotMode();
       if (this.isMovingPlotMode) this.toggleMovePlotMode(false);
-      if (this.isFarmerWalkMode) this.toggleFarmerWalkMode(false);
       this.roadEditTool = 'move';
     } else {
       this.deselectRoadTile();
@@ -1564,12 +1586,8 @@ export class GameEngine3D {
   startPlacingNewPlotMode() {
     this.isPlacingNewPlotMode = true;
     this.isMovingPlotMode = false;
-    this.isFarmerWalkMode = false;
     if (this.isRoadEditMode) this.toggleRoadEditMode(false);
     this.deselectPlotToMove();
-
-    const walkBtn = document.getElementById('btn-action-walk');
-    if (walkBtn) walkBtn.classList.remove('active');
 
     if (!this.plotPlacementGhost) {
       const tileSize = 2.4;
@@ -1657,43 +1675,235 @@ export class GameEngine3D {
     return true;
   }
 
-  toggleFarmerWalkMode(forceState) {
-    if (forceState !== undefined) {
-      this.isFarmerWalkMode = forceState;
+  // Smoothly re-centers the camera onto the farm center
+  recenterCamera() {
+    if (!this.cameraFocusPoint) return;
+    sounds.click();
+    gsap.to(this.cameraFocusPoint, {
+      x: 0,
+      z: 0,
+      duration: 0.65,
+      ease: 'power2.out'
+    });
+    this.panVelocity.set(0, 0);
+  }
+
+  // Autonomous Farmer AI Setup (Roams freely and randomly without player control)
+  initFarmerAutonomousAI() {
+    this.farmerAI = {
+      state: 'IDLE',
+      timer: 2.2,
+      targetX: 0,
+      targetZ: 0,
+      speed: 3.2
+    };
+  }
+
+  pickRandomFarmerTarget() {
+    const candidates = [];
+
+    // 1. Central open farm zones
+    for (let i = 0; i < 6; i++) {
+      candidates.push({
+        x: (Math.random() - 0.5) * 34,
+        z: (Math.random() - 0.5) * 30
+      });
+    }
+
+    // 2. Near plots if any exist
+    if (this.plotObjects && this.plotObjects.size > 0) {
+      const plots = Array.from(this.plotObjects.values());
+      const randomPlot = plots[Math.floor(Math.random() * plots.length)];
+      if (randomPlot) {
+        const angle = Math.random() * Math.PI * 2;
+        candidates.push({
+          x: randomPlot.position.x + Math.cos(angle) * 1.8,
+          z: randomPlot.position.z + Math.sin(angle) * 1.8
+        });
+      }
+    }
+
+    // 3. Near roads if any exist
+    if (this.roadTiles && this.roadTiles.size > 0) {
+      const roads = Array.from(this.roadTiles.values());
+      const randomRoad = roads[Math.floor(Math.random() * roads.length)];
+      if (randomRoad) {
+        candidates.push({
+          x: randomRoad.position.x + (Math.random() - 0.5) * 0.8,
+          z: randomRoad.position.z + (Math.random() - 0.5) * 0.8
+        });
+      }
+    }
+
+    // Filter candidate targets through collision detection
+    for (let i = candidates.length - 1; i >= 0; i--) {
+      const c = candidates[i];
+      if (!this.isBlocked(c.x, c.z, 0.6)) {
+        return c;
+      }
+    }
+
+    return { x: 0, z: 0 };
+  }
+
+  // Character Dialogue Bubble & Farming Atmosphere Speech
+  initFarmerSpeech() {
+    this.speechBoxEl = document.getElementById('farmer-speech-box');
+    this.speechTextEl = document.getElementById('farmer-speech-text');
+    this.speechTimer = 3.5; // First thought appears after 3.5 seconds
+    this.speechDuration = 0;
+    this.isSpeechVisible = false;
+
+    this.farmQuotes = [
+      // أجواء المزرعة والطبيعة والطقس
+      "ما أجمل نسيم الصباح العليل في مروجنا الخضراء! 🌾",
+      "أشعر أن هذا الموسم سيكون مليئاً بالخيرات والبركة 🌻",
+      "التربة خصبة ورائحة الأرض تملأ القلب راحة وانتعاشاً 🌿",
+      "سماء صافية وهواء نقي.. لا شيء يضاهي العيش في الريف! ☀️",
+      "يا له من يوم مشرق ومناسب للعمل والإنجاز في الحقل! 🚜",
+      "رائحة الأرض بعد السقي بالماء تنعش الروح والوجدان 💧",
+      "الهدوء هنا والابتعاد عن صخب المدينة نعمة لا تُقدّر بثمن 🍃",
+      "كوب شاي دافئ بالنعناع بعد جولة في الحقول يجدد النشاط ☕",
+      "سبحان الخالق، انظر كيف تخرج الثمار اليانعة من حبة صغيرة! 🌱",
+      "الشمس تشرق بدفء وحنان على محاصيلنا المباركة 🌅",
+
+      // المحاصيل والزراعة
+      "حان وقت تفقد شتلات الطماطم والذرة ورعايتها بعناية 🍅",
+      "الري المنتظم في الصباح الباكر سر المحصول السليم والوفير 💧",
+      "يا ترى، أي نوع من المحاصيل سنزرع في الأحواض الجديدة؟ 🤔",
+      "ثمار الفراولة تبدو كأنها حبات ياقوت حمراء لامعة وشهية! 🍓",
+      "سنابل القمح تتمايل بلطف مع النسيم، منظر يسر الخاطر 🌾",
+      "البذور الجيدة والتربة الطيبة تصنع أروع المحاصيل دائماً 🌱",
+      "الحصاد الوفير ينتظر دائماً من يعتني بأرضه بحب وإخلاص! 🌽",
+      "انظر كم كبرت النباتات منذ الأمس، تبارك الله ما أحلاها! 🌿",
+      "الأرض تعطي بسخاء كلما أعطيتها من وقتك وحسن رعايتك 🌻",
+
+      // الحيوانات والبهجة
+      "أحب الاستيقاظ على أصوات الدجاج وزقزقة الطيور في الصباح 🐔",
+      "سأمر على الحظيرة لأطمئن على الخراف والأبقار والخيول 🐑",
+      "الأرانب تقفز بسعادة وتبحث عن حبات الجزر الطازجة 🐰",
+      "حيوانات المزرعة تشعر بالمحبة حين نطعمها ونداعبها برفق 🐄",
+      "صوت خرير الماء في البحيرة يبعث على الراحة والسكينة 🐟",
+      "البط يسبح بمرح في البحيرة، ما ألطف هذا المنظر الجميل! 🦆",
+
+      // التشجيع والفخر بالمزرعة
+      "مزرعتنا أصبحت أجمل وأوسع بفضل اهتمامك المستمر وعملك الدؤوب! ✨",
+      "سمعت أن التجار في السوق متشوقون لشراء خضرواتنا الطازجة اليوم 💰",
+      "كل محصول نحصده يقربنا من خطوة جديدة لتوسيع المزرعة 🏆",
+      "العمل في الأرض بركة وسعادة حقيقية لا تضاهيها أي وظيفة 🌾",
+      "الصبر والعمل الدؤوب يصنعان أجمل بستان على الإطلاق 🌸"
+    ];
+  }
+
+  showFarmerSpeech(customText) {
+    if (!this.speechBoxEl || !this.speechTextEl) {
+      this.speechBoxEl = document.getElementById('farmer-speech-box');
+      this.speechTextEl = document.getElementById('farmer-speech-text');
+    }
+    if (!this.speechBoxEl || !this.speechTextEl) return;
+
+    const quote = customText || this.farmQuotes[Math.floor(Math.random() * this.farmQuotes.length)];
+    this.speechTextEl.textContent = quote;
+    this.speechBoxEl.classList.remove('hidden');
+    this.speechBoxEl.classList.add('visible');
+    this.isSpeechVisible = true;
+    this.speechDuration = 5.0; // display for 5.0 seconds
+
+    if (sounds.pop) sounds.pop();
+  }
+
+  hideFarmerSpeech() {
+    if (!this.speechBoxEl) return;
+    this.speechBoxEl.classList.remove('visible');
+    this.speechBoxEl.classList.add('hidden');
+    this.isSpeechVisible = false;
+    this.speechDuration = 0;
+  }
+
+  updateFarmerSpeech(dt) {
+    if (this.isSpeechVisible) {
+      this.speechDuration -= dt;
+      if (this.speechDuration <= 0) {
+        this.hideFarmerSpeech();
+        this.speechTimer = 9.0 + Math.random() * 8.0; // Next quote in 9-17s
+      }
     } else {
-      this.isFarmerWalkMode = !this.isFarmerWalkMode;
+      this.speechTimer -= dt;
+      if (this.speechTimer <= 0) {
+        this.showFarmerSpeech();
+      }
     }
 
-    if (this.isFarmerWalkMode) {
-      if (this.isPlacingNewPlotMode) this.stopPlacingNewPlotMode();
-      if (this.isMovingPlotMode) this.toggleMovePlotMode(false);
-      if (this.isRoadEditMode) this.toggleRoadEditMode(false);
+    // Position speech bubble directly over the farmer's head in screen space
+    if (this.isSpeechVisible && this.speechBoxEl && this.farmerGroup) {
+      const headWorldPos = new THREE.Vector3(
+        this.farmerGroup.position.x,
+        this.farmerGroup.position.y + 2.5,
+        this.farmerGroup.position.z
+      );
+      headWorldPos.project(this.camera);
+
+      // Check if behind camera
+      if (headWorldPos.z > 1.0) {
+        this.speechBoxEl.style.display = 'none';
+        return;
+      }
+
+      const screenX = (headWorldPos.x * 0.5 + 0.5) * window.innerWidth;
+      const screenY = (-headWorldPos.y * 0.5 + 0.5) * window.innerHeight;
+
+      // Check screen bounds
+      if (screenX < -150 || screenX > window.innerWidth + 150 || screenY < -150 || screenY > window.innerHeight + 150) {
+        this.speechBoxEl.style.display = 'none';
+        return;
+      }
+
+      this.speechBoxEl.style.display = 'flex';
+      this.speechBoxEl.style.left = `${screenX}px`;
+      this.speechBoxEl.style.top = `${screenY}px`;
+    }
+  }
+
+  // Tapping or clicking the farmer triggers joyful reaction & speech
+  onFarmerClicked() {
+    sounds.click();
+    if (sounds.pop) sounds.pop();
+
+    if (this.farmerGroup) {
+      // 1. Spurt hearts
+      this.particles.addHeart(this.farmerGroup.position.x, this.farmerGroup.position.z);
+
+      // 2. Playful GSAP jump
+      gsap.killTweensOf(this.farmerGroup.position);
+      gsap.to(this.farmerGroup.position, {
+        y: 0.45,
+        duration: 0.16,
+        yoyo: true,
+        repeat: 1,
+        ease: 'power2.out'
+      });
+
+      // 3. Face the player/camera
+      const targetAngle = this.isoAngle !== undefined ? this.isoAngle : 0;
+      this.farmerGroup.rotation.y = targetAngle;
     }
 
-    const btn = document.getElementById('btn-action-walk');
-    const dpad = document.getElementById('virtual-dpad');
-
-    if (this.isFarmerWalkMode) {
-      if (btn) btn.classList.add('active');
-      if (dpad) dpad.classList.remove('hidden');
-      sounds.click();
-      this.particles.addFloatingText('🚶‍♂️ تم تفعيل حركة المزارع: انقر أو اسحب على الأرض لتوجيه الشخصية', 0, 25, '#38bdf8', 20);
-    } else {
-      if (btn) btn.classList.remove('active');
-      this.isPointerDown = false;
-      this.isDragMoving = false;
-      this.targetMovePoint = null;
-      if (this.moveIndicator) this.moveIndicator.visible = false;
-      sounds.pop();
-      this.particles.addFloatingText('🌾 تم تثبيت الشخصية (حركة المزارع متوقفة)', 0, 25, '#ffd166', 18);
-    }
-    return this.isFarmerWalkMode;
+    // 4. Cheerful speech
+    const greetings = [
+      "أهلاً بك يا صديقي! المزرعة بين يديك وبأفضل حال 👨‍🌾❤️",
+      "يوم رائع وممتع نقضيه معاً بين الحقول والحيوانات! 🌾",
+      "أنا أتجول لأطمئن على أحوال المزرعة، كل شيء على ما يرام! ✨",
+      "مرحباً بك! هل حان وقت الحصاد أم السقي؟ 🥕",
+      "أشعر بالسعادة لرؤية مزرعتنا تكبر وتزدهر كل يوم! 🌟"
+    ];
+    const greeting = greetings[Math.floor(Math.random() * greetings.length)];
+    this.showFarmerSpeech(greeting);
   }
 
   isInteractiveObject(obj) {
     if (!obj || !obj.userData) return false;
     const d = obj.userData;
-    return !!(d.isPlot || d.isPlotPart || d.rootPlot || d.plotGroup || d.isLockTrigger || d.isExpansionSign || d.isPet || d.isTrough || d.isAnimal);
+    return !!(d.isFarmer || d.rootFarmer || d.isPlot || d.isPlotPart || d.rootPlot || d.plotGroup || d.isLockTrigger || d.isExpansionSign || d.isPet || d.isTrough || d.isAnimal);
   }
 
   // ==========================================================
@@ -1711,7 +1921,6 @@ export class GameEngine3D {
 
     if (this.isMovingPlotMode) {
       if (this.isPlacingNewPlotMode) this.stopPlacingNewPlotMode();
-      if (this.isFarmerWalkMode) this.toggleFarmerWalkMode(false);
       if (this.isRoadEditMode) this.toggleRoadEditMode(false);
       if (banner) banner.classList.remove('hidden');
       if (btn) btn.classList.add('active');
@@ -4502,6 +4711,10 @@ export class GameEngine3D {
     this.farmerGroup.add(this.rightLeg);
 
     this.farmerGroup.position.set(0, 0, 0);
+    this.farmerGroup.userData = { isFarmer: true, rootFarmer: this.farmerGroup };
+    this.farmerGroup.traverse(child => {
+      child.userData = { isFarmer: true, rootFarmer: this.farmerGroup };
+    });
     this.scene.add(this.farmerGroup);
   }
 
@@ -6573,17 +6786,18 @@ export class GameEngine3D {
     window.addEventListener('keydown', (e) => {
       this.keys[e.code] = true;
 
-      // Hotbar selection 1-9, 0
+      // Number keys 1-9, 0 to select available seeds from bottom bar
       if (e.key >= '1' && e.key <= '9') {
-        this.state.selectedSlot = parseInt(e.key, 10) - 1;
-        this.state.notify();
-        sounds.click();
-        this.updateCursorStyle();
+        const slotIdx = parseInt(e.key, 10) - 1;
+        const slots = document.querySelectorAll('#hotbar-slots .stardew-slot');
+        if (slots[slotIdx] && !slots[slotIdx].classList.contains('locked-slot')) {
+          slots[slotIdx].click();
+        }
       } else if (e.key === '0') {
-        this.state.selectedSlot = 9;
-        this.state.notify();
-        sounds.click();
-        this.updateCursorStyle();
+        const slots = document.querySelectorAll('#hotbar-slots .stardew-slot');
+        if (slots[9] && !slots[9].classList.contains('locked-slot')) {
+          slots[9].click();
+        }
       }
 
       // E or Space to interact with hovered tile
@@ -6634,15 +6848,14 @@ export class GameEngine3D {
       }
     };
 
-    // Pointer Down on canvas: begin tap or hold
-    this.canvas.addEventListener('pointerdown', (e) => {
-      if (e.button !== 0) return; // Only primary left-click
-      sounds.init();
-      bgm.play();
+    // Shared Click/Tap Resolver for Tapping on Plots, Farmer, Animals, Buildings
+    const handleCanvasClickOrTap = (clientX, clientY) => {
+      this.mouse.x = (clientX / window.innerWidth) * 2 - 1;
+      this.mouse.y = -(clientY / window.innerHeight) * 2 + 1;
+      this.raycaster.setFromCamera(this.mouse, this.camera);
 
-      // Builder mode click / placement handling
+      // 1. Builder Mode Click Handling
       if (this.isBuilderMode) {
-        this.raycaster.setFromCamera(this.mouse, this.camera);
         const hits = this.raycaster.intersectObjects(this.scene.children, true);
         let hitObj = null;
         for (const h of hits) {
@@ -6651,63 +6864,56 @@ export class GameEngine3D {
             break;
           }
         }
-        if (this.planeIntersection) {
+        if (this.raycaster.ray.intersectPlane(this.groundPlane, this.planeIntersection)) {
           this.handleBuilderClick(this.planeIntersection, hitObj);
-        }
-        if (this.builderTool === 'road' || this.builderTool === 'erase' || this.builderTool === 'water') {
-          this.isBuilderPainting = true;
         }
         return;
       }
 
-      // 0. Modular Road Edit Mode: move, erase, or add road tiles
+      // 2. Modular Road Edit Mode
       if (this.isRoadEditMode) {
-        updateGroundTarget(e.clientX, e.clientY);
-        this.handleRoadEditClick(e);
-        return; // NEVER move farmer when editing roads!
+        updateGroundTarget(clientX, clientY);
+        this.handleRoadEditClick({ clientX, clientY });
+        return;
       }
 
-      // 1. Placing New Plot Mode: place plot-by-plot at exact location
+      // 3. Placing New Plot Mode
       if (this.isPlacingNewPlotMode) {
-        updateGroundTarget(e.clientX, e.clientY);
+        updateGroundTarget(clientX, clientY);
         if (this.planeIntersection) {
           const gx = Math.round(this.planeIntersection.x / 1.3) * 1.3;
           const gz = Math.round(this.planeIntersection.z / 1.3) * 1.3;
           this.buyAndPlacePlotAt(gx, gz);
         }
-        return; // NEVER move farmer!
+        return;
       }
 
-      // 2. Moving Plot Mode: move/select plot
+      // 4. Moving Plot Mode
       if (this.isMovingPlotMode) {
         this.handlePlotMoveInteraction();
-        return; // NEVER move farmer!
+        return;
       }
 
-      // 3. EXPLICIT CHARACTER WALK MODE:
-      // When walk mode is active, EVERY click is strictly for moving/steering the character!
-      // NEVER trigger farming actions (زرع، حصاد، سقي، حرث) while in Walk Mode!
-      if (this.isFarmerWalkMode) {
-        this.isPointerDown = true;
-        this.isDragMoving = false;
-        this.pointerDownTime = performance.now();
-        this.pointerDownPos = { x: e.clientX, y: e.clientY };
-        updateGroundTarget(e.clientX, e.clientY);
-        return; // Pure character movement control!
-      }
-
-      // 4. Direct Farming & Interactive Object Click (only when NOT in walk mode)
-      this.raycaster.setFromCamera(this.mouse, this.camera);
+      // 5. Direct Object Interaction (Farmer, Crops, Animals, Trough, Signs)
       const hits = this.raycaster.intersectObjects(this.scene.children, true);
       let targetObj = null;
+
       for (const h of hits) {
         let obj = h.object;
         if (obj === this.cursorMesh || obj === this.plotGhostBox || obj === this.plotPlacementGhost || obj?.userData?.isHelper) continue;
+
+        if (obj.userData?.isFarmer || obj.userData?.rootFarmer || obj === this.farmerGroup || obj.parent === this.farmerGroup) {
+          targetObj = this.farmerGroup;
+          break;
+        }
+
         if (obj.userData?.rootPlot) { obj = obj.userData.rootPlot; }
         while (obj && !this.isInteractiveObject(obj) && obj.parent && obj.parent !== this.scene) {
+          if (obj.userData?.isFarmer || obj.userData?.rootFarmer) { targetObj = this.farmerGroup; break; }
           if (obj.userData?.rootPlot) { obj = obj.userData.rootPlot; break; }
           obj = obj.parent;
         }
+        if (targetObj) break;
         if (this.isInteractiveObject(obj)) {
           targetObj = obj;
           break;
@@ -6715,18 +6921,188 @@ export class GameEngine3D {
       }
 
       if (targetObj) {
+        if (targetObj === this.farmerGroup || targetObj.userData?.isFarmer) {
+          this.onFarmerClicked();
+          return;
+        }
         this.hoveredObject = targetObj;
         this.interactCurrentHover();
-        return; // NEVER move character when clicking any farm object!
+      }
+    };
+
+    // ==========================================================
+    // TOUCH CONTROLS FOR MOBILE AND TABLET (Pan In All Directions & Pinch Zoom)
+    // ==========================================================
+    this.canvas.addEventListener('touchstart', (e) => {
+      sounds.init();
+      bgm.play();
+
+      if (e.touches.length === 1) {
+        this.touchPanActive = true;
+        this.isTouchDraggingFarm = false;
+        this.touchStartX = e.touches[0].clientX;
+        this.touchStartY = e.touches[0].clientY;
+        this.touchLastX = this.touchStartX;
+        this.touchLastY = this.touchStartY;
+        this.touchStartTime = performance.now();
+        this.touchTotalDist = 0;
+        this.panVelocity.set(0, 0);
+      } else if (e.touches.length === 2) {
+        this.isPinchZooming = true;
+        this.touchPanActive = false;
+        this.pinchStartDist = Math.hypot(
+          e.touches[0].clientX - e.touches[1].clientX,
+          e.touches[0].clientY - e.touches[1].clientY
+        );
+        this.pinchStartFrustum = this.frustumSize;
+        this.pinchStartDistance = this.cameraDistance;
+      }
+    }, { passive: false });
+
+    this.canvas.addEventListener('touchmove', (e) => {
+      // Two-finger pinch to zoom in/out
+      if (e.touches.length === 2 && this.isPinchZooming) {
+        e.preventDefault();
+        const curDist = Math.hypot(
+          e.touches[0].clientX - e.touches[1].clientX,
+          e.touches[0].clientY - e.touches[1].clientY
+        );
+        if (this.pinchStartDist > 8 && curDist > 8) {
+          const ratio = this.pinchStartDist / curDist;
+          if (this.isOrthographic) {
+            this.frustumSize = THREE.MathUtils.clamp(this.pinchStartFrustum * ratio, 16, 58);
+            this.updateCameraFrustum();
+          } else {
+            this.cameraDistance = THREE.MathUtils.clamp(this.pinchStartDistance * ratio, 16, 54);
+            this.cameraHeight = this.cameraDistance * (26 / 32);
+          }
+        }
+        return;
+      }
+
+      // Single-finger touch drag across the farm in all directions
+      if (e.touches.length === 1 && this.touchPanActive) {
+        const curX = e.touches[0].clientX;
+        const curY = e.touches[0].clientY;
+        const dx = curX - this.touchLastX;
+        const dy = curY - this.touchLastY;
+        this.touchTotalDist += Math.hypot(dx, dy);
+
+        if (this.touchTotalDist > 7) {
+          this.isTouchDraggingFarm = true;
+          e.preventDefault();
+
+          const camRight = new THREE.Vector3(1, 0, 0).applyQuaternion(this.camera.quaternion);
+          camRight.y = 0;
+          camRight.normalize();
+
+          const camUp = new THREE.Vector3(0, 1, 0).applyQuaternion(this.camera.quaternion);
+          camUp.y = 0;
+          camUp.normalize();
+
+          const worldScale = (this.isOrthographic ? this.frustumSize : this.cameraDistance * 0.9) / Math.min(window.innerWidth, window.innerHeight);
+          const stepX = -dx * worldScale;
+          const stepY = dy * worldScale;
+
+          this.cameraFocusPoint.addScaledVector(camRight, stepX);
+          this.cameraFocusPoint.addScaledVector(camUp, stepY);
+          this.cameraFocusPoint.x = THREE.MathUtils.clamp(this.cameraFocusPoint.x, -38, 38);
+          this.cameraFocusPoint.z = THREE.MathUtils.clamp(this.cameraFocusPoint.z, -36, 36);
+
+          this.panVelocity.set(stepX, stepY);
+          this.touchLastX = curX;
+          this.touchLastY = curY;
+        }
+      }
+    }, { passive: false });
+
+    this.canvas.addEventListener('touchend', (e) => {
+      if (this.isPinchZooming) {
+        if (e.touches.length < 2) this.isPinchZooming = false;
+        return;
+      }
+
+      if (this.touchPanActive) {
+        this.touchPanActive = false;
+        // Clean single tap without dragging -> trigger action or talk to farmer
+        if (!this.isTouchDraggingFarm && this.touchTotalDist <= 8 && (performance.now() - this.touchStartTime < 350)) {
+          handleCanvasClickOrTap(this.touchStartX, this.touchStartY);
+        }
+        this.isTouchDraggingFarm = false;
       }
     });
 
-    // Pointer Move on window: tracks steering smoothly anywhere on screen while held, plus Edge Panning
+    this.canvas.addEventListener('touchcancel', () => {
+      this.touchPanActive = false;
+      this.isTouchDraggingFarm = false;
+      this.isPinchZooming = false;
+    });
+
+    // ==========================================================
+    // DESKTOP MOUSE CONTROLS (Click to interact, Drag to Pan Farm)
+    // ==========================================================
+    this.canvas.addEventListener('pointerdown', (e) => {
+      if (e.pointerType === 'touch') return; // Handled by touch events
+      sounds.init();
+      bgm.play();
+
+      // Right or middle mouse button -> start camera drag pan directly
+      if (e.button === 1 || e.button === 2) {
+        e.preventDefault();
+        this.mouseDragPanActive = true;
+        this.mouseDragLastX = e.clientX;
+        this.mouseDragLastY = e.clientY;
+        return;
+      }
+
+      if (e.button !== 0) return; // Primary left click
+
+      this.mouseDragPanActive = true;
+      this.isMouseDraggingFarm = false;
+      this.mouseDragStartX = e.clientX;
+      this.mouseDragStartY = e.clientY;
+      this.mouseDragLastX = e.clientX;
+      this.mouseDragLastY = e.clientY;
+      this.mouseDragStartTime = performance.now();
+      this.mouseDragTotalDist = 0;
+    });
+
     window.addEventListener('pointermove', (e) => {
       this.mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
       this.mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
 
-      // Screen Edge Pan Detection
+      // Desktop Mouse Drag Pan
+      if (this.mouseDragPanActive && e.pointerType !== 'touch') {
+        const dx = e.clientX - this.mouseDragLastX;
+        const dy = e.clientY - this.mouseDragLastY;
+        this.mouseDragTotalDist = (this.mouseDragTotalDist || 0) + Math.hypot(dx, dy);
+
+        if (this.mouseDragTotalDist > 6) {
+          this.isMouseDraggingFarm = true;
+          const camRight = new THREE.Vector3(1, 0, 0).applyQuaternion(this.camera.quaternion);
+          camRight.y = 0;
+          camRight.normalize();
+
+          const camUp = new THREE.Vector3(0, 1, 0).applyQuaternion(this.camera.quaternion);
+          camUp.y = 0;
+          camUp.normalize();
+
+          const worldScale = (this.isOrthographic ? this.frustumSize : this.cameraDistance * 0.9) / Math.min(window.innerWidth, window.innerHeight);
+          const stepX = -dx * worldScale;
+          const stepY = dy * worldScale;
+
+          this.cameraFocusPoint.addScaledVector(camRight, stepX);
+          this.cameraFocusPoint.addScaledVector(camUp, stepY);
+          this.cameraFocusPoint.x = THREE.MathUtils.clamp(this.cameraFocusPoint.x, -38, 38);
+          this.cameraFocusPoint.z = THREE.MathUtils.clamp(this.cameraFocusPoint.z, -36, 36);
+
+          this.panVelocity.set(stepX, stepY);
+          this.mouseDragLastX = e.clientX;
+          this.mouseDragLastY = e.clientY;
+        }
+      }
+
+      // Desktop Screen Edge Pan Detection
       const w = window.innerWidth;
       const h = window.innerHeight;
       const margin = this.edgePanMargin || 38;
@@ -6734,11 +7110,10 @@ export class GameEngine3D {
       let panX = 0;
       let panY = 0;
 
-      // Ignore edge panning if a modal overlay is visible, or if the pointer is over the interactive HUD panels
       const isModalOpen = document.getElementById('modal-overlay')?.classList.contains('hidden') === false;
       const isOverUI = e.target && (e.target.closest('#modal-overlay, #stardew-right-hud, #bottom-hud-container, .plot-move-banner') !== null);
 
-      if (!isModalOpen && !isOverUI) {
+      if (!isModalOpen && !isOverUI && !this.mouseDragPanActive) {
         if (e.clientX <= margin && e.clientX >= 0) {
           panX = -1; // Pan Left
         } else if (e.clientX >= w - margin && e.clientX <= w) {
@@ -6746,15 +7121,16 @@ export class GameEngine3D {
         }
 
         if (e.clientY <= margin && e.clientY >= 0) {
-          panY = 1; // Pan Up (Screen Top)
+          panY = 1; // Pan Up
         } else if (e.clientY >= h - margin && e.clientY <= h) {
-          panY = -1; // Pan Down (Screen Bottom)
+          panY = -1; // Pan Down
         }
       }
 
       this.edgePanDir.set(panX, panY);
       this.isEdgePanning = (panX !== 0 || panY !== 0);
 
+      // Builder, Road Edit & Plot Placement Hover Updates
       if (this.isBuilderMode) {
         updateGroundTarget(e.clientX, e.clientY);
         if (this.isBuilderPainting && this.planeIntersection) {
@@ -6776,7 +7152,6 @@ export class GameEngine3D {
           const gz = Math.round(this.planeIntersection.z / 1.3) * 1.3;
           this.plotPlacementGhost.position.set(gx, 0.18, gz);
           this.plotPlacementGhost.visible = true;
-
           const isValid = this.canPlacePlotAt(gx, gz, '__new__') && this.state.coins >= 50;
           this.plotPlacementGhost.material.color.setHex(isValid ? 0x22c55e : 0xef4444);
         }
@@ -6790,67 +7165,44 @@ export class GameEngine3D {
           const gz = Math.round(this.planeIntersection.z / 1.3) * 1.3;
           this.plotGhostBox.position.set(gx, 0.16, gz);
           this.plotGhostBox.visible = true;
-
           const isValid = this.canPlacePlotAt(gx, gz, this.selectedPlotToMove.userData.key);
           this.plotGhostBox.material.color.setHex(isValid ? 0x22c55e : 0xef4444);
         }
         return;
       }
-
-      if (this.isFarmerWalkMode && this.isPointerDown) {
-        const distMoved = Math.hypot(e.clientX - this.pointerDownPos.x, e.clientY - this.pointerDownPos.y);
-        const elapsed = performance.now() - this.pointerDownTime;
-
-        // Transition to drag-steering if cursor moved > 6px or button held > 140ms
-        if (distMoved > 6 || elapsed > 140) {
-          this.isDragMoving = true;
-          if (this.moveIndicator) {
-            this.moveIndicator.visible = true;
-          }
-        }
-
-        updateGroundTarget(e.clientX, e.clientY);
-
-        if (this.isDragMoving && this.targetMovePoint && this.moveIndicator) {
-          this.moveIndicator.position.set(this.targetMovePoint.x, 0.08, this.targetMovePoint.z);
-        }
-      }
     });
 
-    // Pointer Up on window
     window.addEventListener('pointerup', (e) => {
+      if (e.pointerType === 'touch') return;
+
       if (this.isBuilderMode) {
         this.isBuilderPainting = false;
-        this.isPointerDown = false;
-        return;
       }
 
-      if (this.isPointerDown) {
-        this.isPointerDown = false;
-        this.isDragMoving = false;
-        this.targetMovePoint = null;
-        if (this.moveIndicator) {
-          this.moveIndicator.visible = false;
+      if (this.mouseDragPanActive) {
+        this.mouseDragPanActive = false;
+        if (!this.isMouseDraggingFarm && (this.mouseDragTotalDist || 0) <= 6 && e.button === 0) {
+          handleCanvasClickOrTap(e.clientX, e.clientY);
         }
+        this.isMouseDraggingFarm = false;
       }
     });
 
     window.addEventListener('pointercancel', () => {
-      this.isBuilderPainting = false;
-      this.isPointerDown = false;
-      this.isDragMoving = false;
-      this.targetMovePoint = null;
-      if (this.moveIndicator) {
-        this.moveIndicator.visible = false;
-      }
+      this.mouseDragPanActive = false;
+      this.isMouseDraggingFarm = false;
       this.edgePanDir.set(0, 0);
       this.isEdgePanning = false;
     });
 
     window.addEventListener('pointerleave', () => {
+      this.mouseDragPanActive = false;
+      this.isMouseDraggingFarm = false;
       this.edgePanDir.set(0, 0);
       this.isEdgePanning = false;
     });
+
+    this.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
     // Mouse wheel zoom with frustum & golden angle preservation
     this.canvas.addEventListener('wheel', (e) => {
@@ -6881,6 +7233,12 @@ export class GameEngine3D {
     if (!this.hoveredObject) return;
 
     const data = this.hoveredObject.userData;
+
+    // 00. Farmer Clicked -> Fun reaction, cheerful speech, jump & hearts!
+    if (data.isFarmer || data.rootFarmer || this.hoveredObject === this.farmerGroup) {
+      this.onFarmerClicked();
+      return;
+    }
 
     // 0A. Trough Station Clicked -> Fill food & water!
     if (data.isTrough) {
@@ -6936,14 +7294,14 @@ export class GameEngine3D {
       const key = data.key;
       const plotPos = plotObj.position;
       const crop = this.crops.get(key);
-      const currentItem = this.state.getSelectedItem();
+      const activeTool = this.activeTool || this.state?.activeTool || 'hoe';
+      const isHoe = activeTool === 'hoe';
+      const isWater = activeTool === 'water';
+      const isHarvest = activeTool === 'harvest';
+      const isPlant = activeTool === 'plant';
+      const selectedSeed = this.state?.selectedSeed || this.selectedSeed || 'corn';
 
-      const isHoe = currentItem && (currentItem.id === 'hoe' || currentItem.type === 'tool_hoe');
-      const isWater = currentItem && (currentItem.id === 'water' || currentItem.type === 'tool_water');
-      const isHarvest = currentItem && (currentItem.id === 'harvest' || currentItem.id === 'scythe' || currentItem.type === 'tool_scythe');
-      const isSeed = currentItem && currentItem.type === 'seed' && currentItem.count > 0;
-
-      // A. Ripe Crop Harvest: ONLY when Harvest tool (Scythe) is selected!
+      // A. Ripe Crop Harvest: When Harvest tool (Scythe) is selected
       if (crop && crop.isMature) {
         if (isHarvest) {
           this.scene.remove(crop.group);
@@ -6955,11 +7313,19 @@ export class GameEngine3D {
           this.state.addCoins(cropDef.sellPrice);
           this.state.addXp(cropDef.xp);
           this.particles.addFloatingText(`+1 حصاد ${cropDef.name}! 🌾 (+${cropDef.sellPrice} G)`, plotPos.x, 25, '#ffd166', 20);
+
+          data.state = 'tilled';
+          if (data.soilMesh) data.soilMesh.material = this.soilDryMat;
+          else plotObj.material = this.soilDryMat;
+          if (data.furrows) {
+            data.furrows.forEach(f => { f.visible = true; f.material = this.soilDryMat; });
+          }
           this.updateActiveCropsHUD();
+          this.state.notify();
           return;
         } else {
           sounds.click();
-          this.particles.addFloatingText('اختر منجل الحصاد 🌾 من الشريط بالأسفل لحصاد المحصول!', plotPos.x, 25, '#fbbf24', 18);
+          this.particles.addFloatingText('اختر منجل الحصاد 🌾 من الشريط بالأعلى لحصاد هذا المحصول!', plotPos.x, 25, '#fbbf24', 18);
           return;
         }
       }
@@ -6974,8 +7340,14 @@ export class GameEngine3D {
           this.state.useEnergy(0.2);
           this.particles.addWaterSplash(plotPos.x, plotPos.z);
           this.particles.addFloatingText(`سقيت النبتة! 💧`, plotPos.x, 25, '#38bdf8', 16);
+          this.state.notify();
+          return;
+        } else if (isWater && data.state === 'watered') {
+          sounds.click();
+          this.particles.addFloatingText('النبتة مروية ورطبة بالفعل 💧', plotPos.x, 25, '#38bdf8', 16);
           return;
         } else {
+          sounds.click();
           const cropDef = CROPS[crop.cropType] || { name: crop.cropType };
           const pct = Math.min(99, Math.round((crop.growthTimer / crop.growthTime) * 100));
           this.particles.addFloatingText(`${cropDef.name}: في مرحلة النمو 🌱 (${pct}%)`, plotPos.x, 25, '#86efac', 16);
@@ -6983,7 +7355,7 @@ export class GameEngine3D {
         }
       }
 
-      // C. Till Grass Soil: ONLY when Hoe tool is selected!
+      // C. Grass Turf: Till with Hoe
       if (data.state === 'grass') {
         if (isHoe) {
           data.state = 'tilled';
@@ -6996,47 +7368,65 @@ export class GameEngine3D {
           this.state.useEnergy(0.3);
           this.particles.addDirtBurst(plotPos.x, plotPos.z);
           this.particles.addFloatingText(`حرثت الأرض! ⛏️`, plotPos.x, 25, '#a16207', 16);
+          this.state.notify();
           return;
         } else {
           sounds.click();
-          this.particles.addFloatingText('اختر الفأس ⛏️ لحرث هذا الحوض!', plotPos.x, 25, '#fed7aa', 18);
+          this.particles.addFloatingText('اختر فأس الحراثة ⛏️ لحرث هذا الحوض!', plotPos.x, 25, '#fed7aa', 18);
           return;
         }
       }
 
-      // D. Water Dry Tilled Soil: ONLY when Watering Can is selected!
-      if (data.state === 'tilled' && !crop) {
-        if (isWater) {
-          data.state = 'watered';
-          if (data.soilMesh) data.soilMesh.material = this.soilWetMat;
-          else plotObj.material = this.soilWetMat;
-          if (data.furrows) {
-            data.furrows.forEach(f => { f.visible = true; f.material = this.soilWetMat; });
-          }
-          sounds.water();
-          this.state.useEnergy(0.2);
-          this.particles.addWaterSplash(plotPos.x, plotPos.z);
-          this.particles.addFloatingText(`سقيت التربة! 💧`, plotPos.x, 25, '#38bdf8', 16);
-          return;
+      // D. Dry Tilled Soil: Water with Watering Can
+      if (data.state === 'tilled' && !crop && isWater) {
+        data.state = 'watered';
+        if (data.soilMesh) data.soilMesh.material = this.soilWetMat;
+        else plotObj.material = this.soilWetMat;
+        if (data.furrows) {
+          data.furrows.forEach(f => { f.visible = true; f.material = this.soilWetMat; });
         }
+        sounds.water();
+        this.state.useEnergy(0.2);
+        this.particles.addWaterSplash(plotPos.x, plotPos.z);
+        this.particles.addFloatingText(`سقيت التربة! 💧`, plotPos.x, 25, '#38bdf8', 16);
+        this.state.notify();
+        return;
       }
 
-      // E. Plant Seed: ONLY when Seed is selected!
+      // E. Tilled or Watered Soil: Plant with Selected Seed
       if ((data.state === 'tilled' || data.state === 'watered') && !crop) {
-        if (isSeed) {
-          const seedType = currentItem.cropId || currentItem.id;
-          this.plantCrop3D(key, plotPos.x, plotPos.z, seedType, 0);
+        if (isPlant) {
+          const cropDef = CROPS[selectedSeed] || CROPS.corn;
+          const seedCount = this.state.getItemTotalCount(selectedSeed);
+          if (seedCount > 0) {
+            this.state.consumeItem(selectedSeed, 1);
+          } else if (this.state.coins >= cropDef.seedCost) {
+            this.state.spendCoins(cropDef.seedCost);
+            this.particles.addFloatingText(`-${cropDef.seedCost} G (شراء بذرة)`, plotPos.x, 28, '#ffd166', 15);
+          } else {
+            sounds.click();
+            this.particles.addFloatingText(`لا توجد بذور ${cropDef.name} ولا ذهب كافٍ (${cropDef.seedCost} G)! 🪙`, plotPos.x, 25, '#ef4444', 18);
+            return;
+          }
+
+          this.plantCrop3D(key, plotPos.x, plotPos.z, selectedSeed, 0);
           sounds.plant();
-          this.state.useSelectedItem();
           this.state.useEnergy(0.2);
-          const cropDef = CROPS[seedType];
-          const seedName = cropDef ? cropDef.name : seedType;
-          this.particles.addFloatingText(`زرعت ${seedName}! 🌱`, plotPos.x, 25, '#4ade80', 16);
+          this.particles.addFloatingText(`زرعت ${cropDef.name}! 🌱`, plotPos.x, 25, '#4ade80', 16);
           this.updateActiveCropsHUD();
+          this.state.notify();
           return;
-        } else if (!isWater && !isHoe) {
+        } else if (isHoe) {
           sounds.click();
-          this.particles.addFloatingText('اختر بذوراً من الخانات 🌱 للزراعة!', plotPos.x, 25, '#86efac', 18);
+          this.particles.addFloatingText('الحوض محروث بالفعل! اختر السقي 💧 أو وضع البذر 🌱', plotPos.x, 25, '#86efac', 16);
+          return;
+        } else if (isHarvest) {
+          sounds.click();
+          this.particles.addFloatingText('لا يوجد محصول ناضج هنا للحصاد 🌾', plotPos.x, 25, '#fbbf24', 16);
+          return;
+        } else if (isWater && data.state === 'watered') {
+          sounds.click();
+          this.particles.addFloatingText('التربة مروية ورطبة بالفعل 💧 جاهزة للبذر 🌱', plotPos.x, 25, '#38bdf8', 16);
           return;
         }
       }
@@ -7549,9 +7939,10 @@ export class GameEngine3D {
       // 1c. Update Meadow Grass Tuft Sway
       this.updateMeadowGrass(time);
 
-      // 2. Move Farmer & Tool display
+      // 2. Move Farmer & Tool display & Speech
       this.updateFarmerMovement(dt);
       this.updateFarmerToolDisplay();
+      this.updateFarmerSpeech(dt);
 
       // 3. Animal Roaming AI & Pets
       this.updateAnimals(dt, time);
@@ -7569,7 +7960,7 @@ export class GameEngine3D {
       // 6. Update Atmosphere (Chimney Smoke & Sun Motes)
       this.updateAtmosphericEffects(dt, time);
 
-      // 7. Camera Behavior: Smooth Follow in Normal Play, or Elevated Panoramic View in Builder Mode
+      // 7. Camera Behavior: Free Touch / Drag Panning, or Elevated Panoramic View in Builder Mode
       if (this.isBuilderMode) {
         const focusX = this.builderCamFocus ? this.builderCamFocus.x : 0;
         const focusZ = this.builderCamFocus ? this.builderCamFocus.z : 0;
@@ -7584,7 +7975,7 @@ export class GameEngine3D {
         this.camera.position.z += (targetCamZ - this.camera.position.z) * 0.08;
         this.camera.lookAt(focusX, 0, focusZ);
       } else {
-        // Edge Panning: Calculate Camera Screen Right and Screen Up vectors in world space
+        // Desktop Edge Panning: Calculate Camera Screen Right and Screen Up vectors in world space
         if (this.isEdgePanning && (this.edgePanDir.x !== 0 || this.edgePanDir.y !== 0)) {
           const camRight = new THREE.Vector3(1, 0, 0).applyQuaternion(this.camera.quaternion);
           camRight.y = 0;
@@ -7605,15 +7996,22 @@ export class GameEngine3D {
           this.cameraFocusPoint.addScaledVector(moveStep, this.edgePanSpeed * dt);
           this.cameraFocusPoint.x = THREE.MathUtils.clamp(this.cameraFocusPoint.x, -38, 38);
           this.cameraFocusPoint.z = THREE.MathUtils.clamp(this.cameraFocusPoint.z, -36, 36);
-        } else {
-          // If the farmer is moving, camera focus smoothly recenters onto the farmer
-          const isFarmerMoving = (this.farmer && this.farmer.isMoving) || this.isPointerDown || this.isDragMoving || this.targetMovePoint ||
-            this.keys['KeyW'] || this.keys['KeyA'] || this.keys['KeyS'] || this.keys['KeyD'] ||
-            this.keys['ArrowUp'] || this.keys['ArrowLeft'] || this.keys['ArrowDown'] || this.keys['ArrowRight'];
+        } else if (this.panVelocity && (Math.abs(this.panVelocity.x) > 0.0001 || Math.abs(this.panVelocity.y) > 0.0001)) {
+          // Inertial momentum pan decay from touch or mouse drag
+          const camRight = new THREE.Vector3(1, 0, 0).applyQuaternion(this.camera.quaternion);
+          camRight.y = 0;
+          camRight.normalize();
 
-          if (isFarmerMoving && this.farmerGroup) {
-            this.cameraFocusPoint.lerp(this.farmerGroup.position, 0.08);
-          }
+          const camUp = new THREE.Vector3(0, 1, 0).applyQuaternion(this.camera.quaternion);
+          camUp.y = 0;
+          camUp.normalize();
+
+          this.cameraFocusPoint.addScaledVector(camRight, this.panVelocity.x);
+          this.cameraFocusPoint.addScaledVector(camUp, this.panVelocity.y);
+          this.cameraFocusPoint.x = THREE.MathUtils.clamp(this.cameraFocusPoint.x, -38, 38);
+          this.cameraFocusPoint.z = THREE.MathUtils.clamp(this.cameraFocusPoint.z, -36, 36);
+
+          this.panVelocity.multiplyScalar(0.88);
         }
 
         const focusX = this.cameraFocusPoint.x;
@@ -7696,131 +8094,26 @@ export class GameEngine3D {
   }
 
   updateFarmerMovement(dt) {
-    if (this.isBuilderMode) return;
+    if (this.isBuilderMode || !this.farmerGroup) return;
 
-    let moveX = 0;
-    let moveZ = 0;
-
-    // 1. Keyboard Controls (WASD / Arrows) - Screen-aligned for isometric view!
-    const inputUp = (this.keys['KeyW'] || this.keys['ArrowUp']) ? 1 : 0;
-    const inputDown = (this.keys['KeyS'] || this.keys['ArrowDown']) ? 1 : 0;
-    const inputLeft = (this.keys['KeyA'] || this.keys['ArrowLeft']) ? 1 : 0;
-    const inputRight = (this.keys['KeyD'] || this.keys['ArrowRight']) ? 1 : 0;
-
-    const screenY = inputDown - inputUp; // +1 down on screen, -1 up on screen
-    const screenX = inputRight - inputLeft; // +1 right on screen, -1 left on screen
-
-    const isKeyboardMoving = screenX !== 0 || screenY !== 0;
-
-    if (isKeyboardMoving) {
-      if (this.isIsometric) {
-        // Rotate screen-aligned vector by the camera azimuth angle so W is ALWAYS Up on screen!
-        const sinA = Math.sin(this.isoAngle);
-        const cosA = Math.cos(this.isoAngle);
-        moveX = screenY * sinA + screenX * cosA;
-        moveZ = screenY * cosA - screenX * sinA;
-      } else {
-        moveX = screenX;
-        moveZ = screenY;
-      }
+    if (!this.farmerAI) {
+      this.initFarmerAutonomousAI();
     }
 
-    let isMoving = isKeyboardMoving;
+    const ai = this.farmerAI;
+    const time = this.elapsedTime;
 
-    // 2. Mouse Click & Hold Continuous Steering (Only if Character Movement Mode is chosen)
-    if (!isMoving && this.isFarmerWalkMode && this.isPointerDown && this.targetMovePoint) {
-      const dx = this.targetMovePoint.x - this.farmerGroup.position.x;
-      const dz = this.targetMovePoint.z - this.farmerGroup.position.z;
-      const dist = Math.hypot(dx, dz);
+    if (ai.state === 'IDLE') {
+      ai.timer -= dt;
 
-      // Deadzone of 0.45 around farmer so he doesn't jitter or spin when cursor is directly on him
-      if (dist > 0.45) {
-        moveX = dx / dist;
-        moveZ = dz / dist;
-        isMoving = true;
-
-        // Smooth steering rotation towards movement direction
-        const targetAngle = Math.atan2(moveX, moveZ);
-        let angleDiff = targetAngle - this.farmerGroup.rotation.y;
-        while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
-        while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
-        this.farmerGroup.rotation.y += angleDiff * Math.min(1, dt * 14);
-
-        // Pulse the golden ground indicator under the cursor
-        if (this.moveIndicator && this.moveIndicator.visible) {
-          const pulse = 1 + Math.sin(this.elapsedTime * 10) * 0.15;
-          this.moveIndicator.scale.set(pulse, pulse, pulse);
-        }
-      }
-    }
-
-    if (isMoving) {
-      const len = Math.hypot(moveX, moveZ);
-      if (len > 0.001) {
-        moveX /= len;
-        moveZ /= len;
-      }
-
-      const speed = this.isRiding ? this.farmerSpeed * 2.5 : this.farmerSpeed;
-      const stepX = moveX * speed * dt;
-      const stepZ = moveZ * speed * dt;
-      const farmerRadius = 0.52;
-
-      const curX = this.farmerGroup.position.x;
-      const curZ = this.farmerGroup.position.z;
-
-      // Realistic Wall-Sliding Collision Resolution
-      if (!this.isBlocked(curX + stepX, curZ + stepZ, farmerRadius)) {
-        this.farmerGroup.position.x += stepX;
-        this.farmerGroup.position.z += stepZ;
-      } else {
-        // Try sliding along X
-        if (!this.isBlocked(curX + stepX, curZ, farmerRadius)) {
-          this.farmerGroup.position.x += stepX;
-        }
-        // Try sliding along Z
-        if (!this.isBlocked(this.farmerGroup.position.x, curZ + stepZ, farmerRadius)) {
-          this.farmerGroup.position.z += stepZ;
-        }
-      }
-
-      // If moving via keyboard, rotate smoothly towards movement direction
-      if (isKeyboardMoving) {
-        const targetAngle = Math.atan2(moveX, moveZ);
-        let angleDiff = targetAngle - this.farmerGroup.rotation.y;
-        while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
-        while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
-        this.farmerGroup.rotation.y += angleDiff * Math.min(1, dt * 16);
-      }
-
-      // Animate walking legs and swinging arms (or keep T-Pose if active)
+      // Gentle breathing & observing surroundings
       if (!this.isTPose) {
-        const walkCycle = Math.sin(this.elapsedTime * 13);
-        const legAngle = walkCycle * 0.55;
-        if (this.leftLeg && this.rightLeg) {
-          this.leftLeg.rotation.x = legAngle;
-          this.rightLeg.rotation.x = -legAngle;
-        }
-        if (this.leftArm && this.rightArm) {
-          this.leftArm.rotation.x = -legAngle * 0.8;
-          this.leftArm.rotation.z = -0.16;
-          this.rightArm.rotation.x = legAngle * 0.8;
-          this.rightArm.rotation.z = 0.16;
-        }
-        // Natural walking bounce for the whole upper body & hat
         if (this.farmerBodyGroup) {
-          this.farmerBodyGroup.position.y = Math.abs(walkCycle) * 0.08;
+          this.farmerBodyGroup.position.y = Math.sin(time * 2.8) * 0.025;
         }
-      } else {
-        // Strict reference T-Pose
-        if (this.leftArm) this.leftArm.rotation.set(0, 0, Math.PI / 2);
-        if (this.rightArm) this.rightArm.rotation.set(0, 0, -Math.PI / 2);
-        if (this.leftLeg) this.leftLeg.rotation.set(0, 0, 0);
-        if (this.rightLeg) this.rightLeg.rotation.set(0, 0, 0);
-        if (this.farmerBodyGroup) this.farmerBodyGroup.position.y = 0;
-      }
-    } else {
-      if (!this.isTPose) {
+        if (this.farmerHeadGroup) {
+          this.farmerHeadGroup.rotation.y = Math.sin(time * 1.4) * 0.28;
+        }
         if (this.leftLeg && this.rightLeg) {
           this.leftLeg.rotation.set(0, 0, 0);
           this.rightLeg.rotation.set(0, 0, 0);
@@ -7829,15 +8122,93 @@ export class GameEngine3D {
           this.leftArm.rotation.set(0, 0, -0.16);
           this.rightArm.rotation.set(0, 0, 0.16);
         }
-        if (this.farmerBodyGroup) {
-          this.farmerBodyGroup.position.y = 0;
+      }
+
+      if (ai.timer <= 0) {
+        const target = this.pickRandomFarmerTarget();
+        ai.targetX = target.x;
+        ai.targetZ = target.z;
+        ai.state = 'WANDER';
+        ai.timer = 5.0 + Math.random() * 4.5; // Wander for up to 9 seconds
+      }
+
+    } else if (ai.state === 'WANDER') {
+      ai.timer -= dt;
+
+      const curX = this.farmerGroup.position.x;
+      const curZ = this.farmerGroup.position.z;
+      const dx = ai.targetX - curX;
+      const dz = ai.targetZ - curZ;
+      const dist = Math.hypot(dx, dz);
+
+      if (dist < 0.45 || ai.timer <= 0) {
+        // Arrived at destination or timeout
+        ai.state = 'IDLE';
+        ai.timer = 3.5 + Math.random() * 4.5; // Rest for 3.5-8s
+
+        // 25% chance to share a thought upon stopping
+        if (Math.random() < 0.25 && !this.isSpeechVisible) {
+          this.showFarmerSpeech();
         }
       } else {
-        if (this.leftArm) this.leftArm.rotation.set(0, 0, Math.PI / 2);
-        if (this.rightArm) this.rightArm.rotation.set(0, 0, -Math.PI / 2);
-        if (this.leftLeg) this.leftLeg.rotation.set(0, 0, 0);
-        if (this.rightLeg) this.rightLeg.rotation.set(0, 0, 0);
-        if (this.farmerBodyGroup) this.farmerBodyGroup.position.y = 0;
+        const dirX = dx / dist;
+        const dirZ = dz / dist;
+        const speed = this.isRiding ? ai.speed * 2.2 : ai.speed;
+        const step = speed * dt;
+        const farmerRadius = 0.52;
+
+        const nextX = curX + dirX * step;
+        const nextZ = curZ + dirZ * step;
+
+        let moved = false;
+        if (!this.isBlocked(nextX, nextZ, farmerRadius)) {
+          this.farmerGroup.position.x = nextX;
+          this.farmerGroup.position.z = nextZ;
+          moved = true;
+        } else {
+          // Slide along X
+          if (!this.isBlocked(nextX, curZ, farmerRadius)) {
+            this.farmerGroup.position.x = nextX;
+            moved = true;
+          }
+          // Slide along Z
+          if (!this.isBlocked(curX, nextZ, farmerRadius)) {
+            this.farmerGroup.position.z = nextZ;
+            moved = true;
+          }
+        }
+
+        // If completely stuck against an obstacle, end wander early
+        if (!moved) {
+          ai.state = 'IDLE';
+          ai.timer = 2.5;
+        }
+
+        // Smooth rotation towards movement direction
+        const targetAngle = Math.atan2(dirX, dirZ);
+        let angleDiff = targetAngle - this.farmerGroup.rotation.y;
+        while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+        while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+        this.farmerGroup.rotation.y += angleDiff * Math.min(1, dt * 9.5);
+
+        // Walk cycle animation
+        if (!this.isTPose) {
+          const walkCycle = Math.sin(time * 9.5);
+          const legAngle = walkCycle * 0.5;
+          if (this.leftLeg && this.rightLeg) {
+            this.leftLeg.rotation.x = legAngle;
+            this.rightLeg.rotation.x = -legAngle;
+          }
+          if (this.leftArm && this.rightArm) {
+            this.leftArm.rotation.x = -legAngle * 0.7;
+            this.leftArm.rotation.z = -0.16;
+            this.rightArm.rotation.x = legAngle * 0.7;
+            this.rightArm.rotation.z = 0.16;
+          }
+          if (this.farmerBodyGroup) {
+            this.farmerBodyGroup.position.y = Math.abs(walkCycle) * 0.06;
+          }
+        }
       }
     }
   }

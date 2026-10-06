@@ -37,6 +37,19 @@ export class UIManager {
       <div id="game-container">
         <canvas id="game-canvas"></canvas>
 
+        <!-- Floating Speech Bubble / Farmer Chat Box -->
+        <div id="farmer-speech-box" class="farmer-speech-box hidden" dir="rtl" title="انقر لسماع حديث المزارع 👨‍🌾">
+          <div class="speech-avatar-bubble">👨‍🌾</div>
+          <div class="speech-bubble-body">
+            <div class="speech-bubble-header">
+              <span class="speech-farmer-title">المزارع</span>
+              <span class="speech-status-dot"></span>
+            </div>
+            <div class="speech-bubble-text" id="farmer-speech-text">ما أجمل نسيم الصباح في المزرعة! 🌾</div>
+          </div>
+          <div class="speech-tail"></div>
+        </div>
+
         <!-- Unified Right-Side Stardew Farm Dashboard -->
         <div id="stardew-right-hud" class="stardew-right-hud" dir="rtl">
           <!-- 1. Player Profile, Level, Calendar, Clock & Gold -->
@@ -100,6 +113,9 @@ export class UIManager {
 
           <!-- Mobile Collapsible Controls Bar (Only visible on screens <= 900px) -->
           <div class="mobile-hud-toggle-bar" id="mobile-hud-toggle-bar">
+            <button class="mobile-toggle-btn" id="btn-recenter-cam" aria-label="إعادة ضبط الكاميرا" title="إعادة الكاميرا لوسط المزرعة">
+              <span>📍 المزرعة</span>
+            </button>
             <button class="mobile-toggle-btn" id="btn-toggle-mobile-dock" aria-label="أدوات اللعبة">
               <span>⚡ القائمة</span>
               <span class="toggle-indicator" id="dock-toggle-indicator">▼</span>
@@ -175,14 +191,6 @@ export class UIManager {
               <div class="dock-tooltip">
                 <div class="dock-tooltip-title">👔 <span id="outfit-btn-label">المظهر (الأساسي)</span></div>
                 <div class="dock-tooltip-desc">التبديل بين الزي البرتقالي الأصلي والرمادي البديل</div>
-              </div>
-            </button>
-
-            <button class="dock-btn tpose-btn" id="btn-toggle-tpose" aria-label="وضع T-Pose">
-              <span class="dock-icon">🧍</span>
-              <div class="dock-tooltip">
-                <div class="dock-tooltip-title">🧍 <span id="tpose-btn-label">وضع T-Pose</span></div>
-                <div class="dock-tooltip-desc">تثبيت وضعية T-Pose لمعاينة وفحص مجسم 3D</div>
               </div>
             </button>
 
@@ -298,14 +306,6 @@ export class UIManager {
           </div>
         </div>
 
-        <!-- On-Screen Character Movement D-Pad Controller -->
-        <div id="virtual-dpad" class="virtual-dpad" title="أزرار حركة الشخصية المباشرة">
-          <button class="dpad-btn up" id="dpad-up" title="للأعلى (W)">▲</button>
-          <button class="dpad-btn left" id="dpad-left" title="لليسار (A)">◀</button>
-          <div class="dpad-center">🚶</div>
-          <button class="dpad-btn right" id="dpad-right" title="لليمين (D)">▶</button>
-          <button class="dpad-btn down" id="dpad-down" title="للأسفل (S)">▼</button>
-        </div>
 
         <!-- Bottom Unified Game HUD (Farming Actions & Hotbar) -->
         <div id="bottom-hud-container">
@@ -335,10 +335,6 @@ export class UIManager {
 
             <!-- Group 2: Mode & Farm Controls -->
             <div class="hud-group farm-modes-group">
-              <button class="farm-action-btn walk" id="btn-action-walk" title="تحريك الشخصية (تحكم كامل بالحركة وتوجيه المزارع دون زراعة أو حصاد بالخطأ)">
-                <span class="act-icon">🚶‍♂️</span>
-                <span class="walk-label">حركة الشخصية</span>
-              </button>
               <button class="farm-action-btn expand" id="btn-action-expand" title="إضافة حوض زراعة جديد (50 ذهب - كمية مفتوحة ومكان حر)">
                 <span class="act-icon">🪵</span>
                 <span>إضافة حوض</span>
@@ -350,10 +346,6 @@ export class UIManager {
               <button class="farm-action-btn road-mode" id="btn-action-road-mode" title="تعديل مربعات الطريق (نقل، مسح، أو رصف مربعات جديدة)">
                 <span class="act-icon">🛣️</span>
                 <span>تعديل الطريق</span>
-              </button>
-              <button class="farm-action-btn arrange" id="btn-action-arrange" title="ترتيب وتقسيم أرض الزراعة (شبكة، صفوف، مربعات، مصاطب)">
-                <span class="act-icon">📐</span>
-                <span>ترتيب الأرض</span>
               </button>
             </div>
           </div>
@@ -393,96 +385,137 @@ export class UIManager {
     if (!container || !this.state) return;
     container.innerHTML = '';
 
-    this.state.hotbar.forEach((item, index) => {
+    const allCrops = Object.values(CROPS).sort((a, b) => a.minLevel - b.minLevel);
+    const currentLevel = this.state.level || 1;
+
+    // Filter unlocked crops vs upcoming locked crops
+    const unlockedCrops = allCrops.filter(c => c.minLevel <= currentLevel);
+    const lockedCrops = allCrops.filter(c => c.minLevel > currentLevel);
+
+    // Ensure valid selected seed
+    if (!this.state.selectedSeed || !unlockedCrops.some(c => c.id === this.state.selectedSeed)) {
+      this.state.selectedSeed = unlockedCrops[0]?.id || 'corn';
+    }
+    if (this.engine) this.engine.selectedSeed = this.state.selectedSeed;
+
+    // Show unlocked crops + upcoming locked crops (up to 10 slots max)
+    const slotsToShow = [...unlockedCrops, ...lockedCrops].slice(0, 10);
+
+    slotsToShow.forEach((crop, index) => {
+      const isUnlocked = crop.minLevel <= currentLevel;
+      const isSelected = isUnlocked && (this.state.selectedSeed === crop.id);
       const slot = document.createElement('button');
-      slot.className = `stardew-slot ${this.state.selectedSlot === index ? 'active' : ''}`;
+      slot.className = `stardew-slot seed-slot ${isUnlocked ? '' : 'locked-slot'} ${isSelected ? 'active' : ''}`;
+      slot.dataset.cropId = crop.id;
       slot.dataset.index = index;
 
       const displayKey = index === 9 ? '10' : (index + 1).toString();
-      const showCount = item.count > 1;
+      const count = isUnlocked ? this.state.getItemTotalCount(crop.id) : 0;
 
-      slot.innerHTML = `
-        <span class="slot-num">${displayKey}</span>
-        <span class="slot-icon">${item.icon}</span>
-        ${showCount ? `<span class="slot-stack">${item.count}</span>` : ''}
-      `;
+      if (isUnlocked) {
+        slot.title = `بذور ${crop.name} (المستوى ${crop.minLevel}) - انقر لاختيارها للزرع 🌱`;
+        slot.innerHTML = `
+          <span class="slot-num">${displayKey}</span>
+          <span class="slot-icon">${crop.icon}</span>
+          <span class="slot-stack ${count <= 0 ? 'zero-stock' : ''}">${count > 0 ? count : (crop.seedCost + 'G')}</span>
+        `;
 
-      slot.addEventListener('click', () => {
-        if (this.engine && this.engine.isFarmerWalkMode) {
-          this.engine.toggleFarmerWalkMode(false);
-        }
-        this.state.selectedSlot = index;
-        sounds.click();
-        this.updateHotbar();
-        this.syncActionButtonsWithSelection();
-        if (this.engine && typeof this.engine.updateCursorStyle === 'function') {
-          this.engine.updateCursorStyle();
-        }
-      });
+        slot.addEventListener('click', () => {
+          this.state.selectedSeed = crop.id;
+          if (this.engine) this.engine.selectedSeed = crop.id;
+          sounds.click();
+          this.selectTool('plant');
+          this.updateHotbar();
+          if (this.engine && this.engine.particles) {
+            this.engine.particles.addFloatingText(`تم اختيار بذور ${crop.name} 🌱`, 0, 26, '#4ade80', 20);
+          }
+        });
+      } else {
+        slot.title = `مغلق 🔒 - يُفتح عند المستوى ${crop.minLevel} (${crop.name})`;
+        slot.innerHTML = `
+          <span class="slot-num">L${crop.minLevel}</span>
+          <span class="slot-icon locked-icon">${crop.icon}</span>
+          <span class="slot-lock-badge">🔒</span>
+        `;
+
+        slot.addEventListener('click', () => {
+          sounds.click();
+          if (this.engine && this.engine.particles) {
+            this.engine.particles.addFloatingText(`تُفتح بذور ${crop.name} عند المستوى ${crop.minLevel}! 🔒`, 0, 26, '#ffd166', 18);
+          }
+        });
+      }
 
       container.appendChild(slot);
     });
 
+    this._lastRenderedLevel = currentLevel;
     this.syncActionButtonsWithSelection();
+  }
+
+  selectTool(toolId) {
+    if (this.engine) this.engine.activeTool = toolId;
+    if (this.state) this.state.activeTool = toolId;
+    this.syncActionButtonsWithSelection();
+
+    if (this.engine) {
+      if (typeof this.engine.updateCursorStyle === 'function') {
+        this.engine.updateCursorStyle();
+      }
+      if (this.engine.particles) {
+        const toolMessages = {
+          hoe: 'تم تجهيز فأس الحراثة ⛏️ - اضغط على أي حوض لحرثه',
+          water: 'تم تجهيز مرشة الماء 💧 - اضغط على الأحواض لريها',
+          plant: 'تم تجهيز وضع البذر 🌱 - اختر نوع البذور واضغط للزرع',
+          harvest: 'تم تجهيز منجل الحصاد 🌾 - اضغط على المحاصيل الناضجة لحصادها'
+        };
+        if (toolMessages[toolId]) {
+          this.engine.particles.addFloatingText(toolMessages[toolId], 0, 28, '#ffd166', 19);
+        }
+      }
+    }
   }
 
   syncActionButtonsWithSelection() {
     if (!this.state) return;
-    const selectedItem = this.state.getSelectedItem();
-    const isWalk = this.engine && this.engine.isFarmerWalkMode;
+    const activeTool = this.engine?.activeTool || this.state.activeTool || 'hoe';
 
     const tillBtn = document.getElementById('btn-action-till');
     const waterBtn = document.getElementById('btn-action-water');
     const plantBtn = document.getElementById('btn-action-plant');
     const harvestBtn = document.getElementById('btn-action-harvest');
-    const walkBtn = document.getElementById('btn-action-walk');
-    const walkLabel = walkBtn ? walkBtn.querySelector('.walk-label') : null;
 
-    if (walkBtn) {
-      walkBtn.classList.toggle('active', !!isWalk);
-      if (walkLabel) {
-        walkLabel.textContent = isWalk ? 'حركة الشخصية (نشطة)' : 'حركة الشخصية';
-      }
-    }
-
-    if (isWalk) {
-      if (tillBtn) tillBtn.classList.remove('active');
-      if (waterBtn) waterBtn.classList.remove('active');
-      if (plantBtn) plantBtn.classList.remove('active');
-      if (harvestBtn) harvestBtn.classList.remove('active');
-      return;
-    }
-
-    const isHoe = selectedItem && (selectedItem.id === 'hoe' || selectedItem.type === 'tool_hoe');
-    const isWater = selectedItem && (selectedItem.id === 'water' || selectedItem.type === 'tool_water');
-    const isPlant = selectedItem && (selectedItem.type === 'seed' || selectedItem.id === 'corn' || selectedItem.id === 'carrot');
-    const isHarvest = selectedItem && (selectedItem.id === 'harvest' || selectedItem.id === 'scythe' || selectedItem.type === 'tool_scythe');
-
-    if (tillBtn) tillBtn.classList.toggle('active', !!isHoe);
-    if (waterBtn) waterBtn.classList.toggle('active', !!isWater);
-    if (plantBtn) plantBtn.classList.toggle('active', !!isPlant);
-    if (harvestBtn) harvestBtn.classList.toggle('active', !!isHarvest);
+    if (tillBtn) tillBtn.classList.toggle('active', activeTool === 'hoe');
+    if (waterBtn) waterBtn.classList.toggle('active', activeTool === 'water');
+    if (plantBtn) plantBtn.classList.toggle('active', activeTool === 'plant');
+    if (harvestBtn) harvestBtn.classList.toggle('active', activeTool === 'harvest');
   }
 
   updateHotbar() {
     if (!this.state) return;
-    const slots = document.querySelectorAll('.stardew-slot');
-    slots.forEach((slot, index) => {
-      const item = this.state.hotbar[index];
-      slot.classList.toggle('active', this.state.selectedSlot === index);
+    const container = document.getElementById('hotbar-slots');
+    if (!container) return;
 
+    const currentLevel = this.state.level || 1;
+    if (this._lastRenderedLevel !== currentLevel) {
+      this.renderHotbarSlots();
+      return;
+    }
+
+    const slots = container.querySelectorAll('.stardew-slot');
+    slots.forEach(slot => {
+      const cropId = slot.dataset.cropId;
+      if (!cropId || slot.classList.contains('locked-slot')) return;
+
+      const crop = CROPS[cropId];
+      const isSelected = this.state.selectedSeed === cropId;
+      slot.classList.toggle('active', isSelected);
+
+      const count = this.state.getItemTotalCount(cropId);
       const stackEl = slot.querySelector('.slot-stack');
-      if (item && item.count > 1) {
-        if (stackEl) {
-          stackEl.textContent = item.count;
-        } else {
-          const newStack = document.createElement('span');
-          newStack.className = 'slot-stack';
-          newStack.textContent = item.count;
-          slot.appendChild(newStack);
-        }
-      } else if (stackEl) {
-        stackEl.remove();
+      if (stackEl) {
+        stackEl.textContent = count > 0 ? count : (crop ? crop.seedCost + 'G' : '0');
+        stackEl.classList.toggle('zero-stock', count <= 0);
       }
     });
 
@@ -692,90 +725,36 @@ export class UIManager {
       }
     });
 
-    // On-Screen Direct Farming Actions (Syncs with Hotbar & Equips Matching Tool)
-    document.getElementById('btn-action-till').addEventListener('click', () => {
-      sounds.click();
-      if (this.engine) {
-        if (this.engine.isFarmerWalkMode) this.engine.toggleFarmerWalkMode(false);
-        const hoeIdx = this.state.hotbar.findIndex(x => x && (x.id === 'hoe' || x.type === 'tool_hoe'));
-        if (hoeIdx !== -1) {
-          this.state.selectedSlot = hoeIdx;
-          this.updateHotbar();
-        }
-        this.syncActionButtonsWithSelection();
-        if (typeof this.engine.tillAction === 'function') {
-          this.engine.tillAction();
-        } else if (this.engine.farmer && this.engine.tileMap) {
-          const target = this.engine.farmer.getTargetTile();
-          this.engine.tileMap.till(target.col, target.row);
-        }
-      }
-    });
-
-    document.getElementById('btn-action-water').addEventListener('click', () => {
-      sounds.click();
-      if (this.engine) {
-        if (this.engine.isFarmerWalkMode) this.engine.toggleFarmerWalkMode(false);
-        const waterIdx = this.state.hotbar.findIndex(x => x && (x.id === 'water' || x.type === 'tool_water'));
-        if (waterIdx !== -1) {
-          this.state.selectedSlot = waterIdx;
-          this.updateHotbar();
-        }
-        this.syncActionButtonsWithSelection();
-        if (typeof this.engine.waterAction === 'function') {
-          this.engine.waterAction();
-        } else if (this.engine.farmer && this.engine.tileMap) {
-          const target = this.engine.farmer.getTargetTile();
-          this.engine.tileMap.water(target.col, target.row);
-        }
-      }
-    });
-
-    document.getElementById('btn-action-plant').addEventListener('click', () => {
-      sounds.click();
-      if (this.engine) {
-        if (this.engine.isFarmerWalkMode) this.engine.toggleFarmerWalkMode(false);
-        const seedIdx = this.state.hotbar.findIndex(x => x && (x.type === 'seed' || x.id === 'corn' || x.id === 'carrot') && x.count > 0);
-        if (seedIdx !== -1) {
-          this.state.selectedSlot = seedIdx;
-          this.updateHotbar();
-        }
-        this.syncActionButtonsWithSelection();
-        if (typeof this.engine.plantAction === 'function') {
-          this.engine.plantAction();
-        } else if (this.engine.farmer && this.engine.cropsManager) {
-          const target = this.engine.farmer.getTargetTile();
-          const current = this.engine.state.getSelectedItem();
-          let seed = (current && current.type === 'seed' && current.count > 0) ? (current.cropId || current.id) : 'corn';
-          this.engine.cropsManager.plant(target.col, target.row, seed);
-        }
-      }
-    });
-
-    document.getElementById('btn-action-harvest').addEventListener('click', () => {
-      sounds.click();
-      if (this.engine) {
-        if (this.engine.isFarmerWalkMode) this.engine.toggleFarmerWalkMode(false);
-        const harvestIdx = this.state.hotbar.findIndex(x => x && (x.id === 'harvest' || x.id === 'scythe' || x.type === 'tool_scythe'));
-        if (harvestIdx !== -1) {
-          this.state.selectedSlot = harvestIdx;
-          this.updateHotbar();
-        }
-        this.syncActionButtonsWithSelection();
-        if (typeof this.engine.harvestAction === 'function') {
-          this.engine.harvestAction();
-        } else if (this.engine.farmer && this.engine.cropsManager) {
-          const target = this.engine.farmer.getTargetTile();
-          this.engine.cropsManager.harvest(target.col, target.row);
-        }
-      }
-    });
-
-    const arrangeBtn = document.getElementById('btn-action-arrange');
-    if (arrangeBtn) {
-      arrangeBtn.addEventListener('click', () => {
+    // Direct Farming Tool Selectors (Select active tool; no mass action)
+    const tillBtn = document.getElementById('btn-action-till');
+    if (tillBtn) {
+      tillBtn.addEventListener('click', () => {
         sounds.click();
-        this.openArrangePlotsModal();
+        this.selectTool('hoe');
+      });
+    }
+
+    const waterBtn = document.getElementById('btn-action-water');
+    if (waterBtn) {
+      waterBtn.addEventListener('click', () => {
+        sounds.click();
+        this.selectTool('water');
+      });
+    }
+
+    const plantBtn = document.getElementById('btn-action-plant');
+    if (plantBtn) {
+      plantBtn.addEventListener('click', () => {
+        sounds.click();
+        this.selectTool('plant');
+      });
+    }
+
+    const harvestBtn = document.getElementById('btn-action-harvest');
+    if (harvestBtn) {
+      harvestBtn.addEventListener('click', () => {
+        sounds.click();
+        this.selectTool('harvest');
       });
     }
 
@@ -809,16 +788,7 @@ export class UIManager {
       });
     }
 
-    const walkBtn = document.getElementById('btn-action-walk');
-    if (walkBtn) {
-      walkBtn.addEventListener('click', () => {
-        sounds.click();
-        if (this.engine && typeof this.engine.toggleFarmerWalkMode === 'function') {
-          this.engine.toggleFarmerWalkMode();
-          this.syncActionButtonsWithSelection();
-        }
-      });
-    }
+
 
     const expandBtn = document.getElementById('btn-action-expand');
     if (expandBtn) {
@@ -895,29 +865,27 @@ export class UIManager {
       });
     }
 
-    // On-Screen Virtual D-Pad (Direct Character Movement Control)
-    const setupDpadKey = (id, keyCode) => {
-      const el = document.getElementById(id);
-      if (!el) return;
-      const start = (e) => {
-        e.preventDefault();
-        el.classList.add('pressed');
-        if (this.engine && this.engine.keys) this.engine.keys[keyCode] = true;
-      };
-      const end = (e) => {
-        e.preventDefault();
-        el.classList.remove('pressed');
-        if (this.engine && this.engine.keys) this.engine.keys[keyCode] = false;
-      };
-      el.addEventListener('pointerdown', start);
-      el.addEventListener('pointerup', end);
-      el.addEventListener('pointerleave', end);
-      el.addEventListener('pointercancel', end);
-    };
-    setupDpadKey('dpad-up', 'KeyW');
-    setupDpadKey('dpad-down', 'KeyS');
-    setupDpadKey('dpad-left', 'KeyA');
-    setupDpadKey('dpad-right', 'KeyD');
+    // Mobile / Tablet Camera Recenter Button
+    const recenterBtn = document.getElementById('btn-recenter-cam');
+    if (recenterBtn) {
+      recenterBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        sounds.click();
+        if (this.engine && typeof this.engine.recenterCamera === 'function') {
+          this.engine.recenterCamera();
+        }
+      });
+    }
+
+    // Farmer Speech Box interaction (tap to cycle dialogue or hear voice)
+    const speechBox = document.getElementById('farmer-speech-box');
+    if (speechBox) {
+      speechBox.addEventListener('click', () => {
+        if (this.engine && typeof this.engine.onFarmerClicked === 'function') {
+          this.engine.onFarmerClicked();
+        }
+      });
+    }
 
     const newGameBtn = document.getElementById('btn-open-newgame');
     if (newGameBtn) {
@@ -940,24 +908,6 @@ export class UIManager {
             this.engine.particles.addFloatingText(
               isAlt ? 'الزي البديل (رمادي وجينز باهت) ✨' : 'الزي الأساسي (كاروهات برتقالي وكحلي) 🌾',
               0, 25, isAlt ? '#94a3b8' : '#fb923c', 22
-            );
-          }
-        }
-      });
-    }
-
-    const tposeBtn = document.getElementById('btn-toggle-tpose');
-    if (tposeBtn) {
-      tposeBtn.addEventListener('click', () => {
-        sounds.click();
-        if (this.engine && typeof this.engine.toggleTPose === 'function') {
-          const active = this.engine.toggleTPose();
-          const label = document.getElementById('tpose-btn-label');
-          if (label) label.textContent = active ? 'إلغاء T-Pose' : 'وضع T-Pose';
-          if (this.engine.particles) {
-            this.engine.particles.addFloatingText(
-              active ? 'وضعية النموذج (T-Pose) مفعلة 🧍' : 'وضعية اللعب الطبيعية 🏃',
-              0, 25, '#ffd166', 22
             );
           }
         }
@@ -2050,8 +2000,14 @@ export class UIManager {
   showLevelUpModal(level, skill, bonus = 0) {
     const banner = document.getElementById('levelup-banner');
     const desc = document.getElementById('levelup-desc');
-    desc.textContent = `ارتقيت في مهارة الزراعة إلى المستوى ${skill} ومستوى المزرعة ${level}! تم فتح أرباح ومحاصيل جديدة وحصلت على منحة ${bonus || level * 100} G 🪙!`;
+    const newCrops = Object.values(CROPS).filter(c => c.minLevel === level);
+    let cropText = '';
+    if (newCrops.length > 0) {
+      cropText = ` 🌱 تم فتح بذور جديدة: ${newCrops.map(c => `${c.icon} ${c.name}`).join(' و ')}!`;
+    }
+    desc.textContent = `مبروك! ارتقيت إلى المستوى ${level}!${cropText} حصلت على مكافأة ${bonus || level * 100} G 🪙 وبذور مجانية لبدء الزراعة!`;
     banner.classList.remove('hidden');
     confetti({ particleCount: 80, spread: 90, origin: { x: 0.5, y: 0.5 } });
+    this.renderHotbarSlots();
   }
 }
