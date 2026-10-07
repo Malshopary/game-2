@@ -77,11 +77,15 @@ body, html {
 }
 
 #game-canvas.cursor-seed {
-  cursor: var(--cursor-seed) !important;
+  cursor: var(--cursor-current-seed, var(--cursor-seed)) !important;
 }
 
-#game-canvas:active {
+#game-canvas.is-panning {
   cursor: grabbing !important;
+}
+
+button, .farm-action-btn, .stardew-slot, .wood-btn, .game-btn, .clickable, select, input[type="button"], input[type="submit"] {
+  cursor: var(--cursor-hand) !important;
 }
 
 /* ========================================================

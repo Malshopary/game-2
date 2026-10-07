@@ -313,19 +313,15 @@ export class UIManager {
           <div id="quick-farming-bar">
             <!-- Group 1: Farming Actions -->
             <div class="hud-group farming-actions-group">
-              <button class="farm-action-btn till" id="btn-action-till" title="حرث الأرض (فأس ⛏️ - مفتاح 1)">
+              <button class="farm-action-btn till" id="btn-action-till" title="حرث الأرض (فأس ⛏️)">
                 <span class="act-icon">⛏️</span>
                 <span>حرث</span>
               </button>
-              <button class="farm-action-btn water" id="btn-action-water" title="ري المحاصيل (مرشة 💧 - مفتاح 2)">
+              <button class="farm-action-btn water" id="btn-action-water" title="ري المحاصيل (جردل الرش 💧)">
                 <span class="act-icon">💧</span>
                 <span>سقي</span>
               </button>
-              <button class="farm-action-btn plant" id="btn-action-plant" title="زرع بذور (بذرة 🌱 - مفتاح 4)">
-                <span class="act-icon">🌱</span>
-                <span>زرع</span>
-              </button>
-              <button class="farm-action-btn harvest" id="btn-action-harvest" title="حصاد المحصول (منجل 🌾 - مفتاح 3)">
+              <button class="farm-action-btn harvest" id="btn-action-harvest" title="حصاد المحصول (منجل 🌾)">
                 <span class="act-icon">🌾</span>
                 <span>حصاد</span>
               </button>
@@ -421,13 +417,19 @@ export class UIManager {
         `;
 
         slot.addEventListener('click', () => {
+          if (this.state.activeTool === 'plant' && this.state.selectedSeed === crop.id) {
+            // Clicking active seed slot again toggles off back to hand
+            sounds.pop ? sounds.pop() : sounds.click();
+            this.selectTool('hand');
+            return;
+          }
           this.state.selectedSeed = crop.id;
           if (this.engine) this.engine.selectedSeed = crop.id;
           sounds.click();
           this.selectTool('plant');
           this.updateHotbar();
           if (this.engine && this.engine.particles) {
-            this.engine.particles.addFloatingText(`تم اختيار بذور ${crop.name} 🌱`, 0, 26, '#4ade80', 20);
+            this.engine.particles.addFloatingText(`تم اختيار بذور ${crop.name} ${crop.icon} - جاهز للزرع مباشرة! 🌱`, 0, 26, '#4ade80', 20);
           }
         });
       } else {
@@ -454,9 +456,16 @@ export class UIManager {
   }
 
   selectTool(toolId) {
+    // Toggle: if selecting the currently active tool again, toggle off to 'hand'
+    const currentTool = this.engine?.activeTool || this.state?.activeTool;
+    if (currentTool === toolId) {
+      toolId = 'hand';
+    }
+
     if (this.engine) this.engine.activeTool = toolId;
     if (this.state) this.state.activeTool = toolId;
     this.syncActionButtonsWithSelection();
+    this.updateHotbar();
 
     if (this.engine) {
       if (typeof this.engine.updateCursorStyle === 'function') {
@@ -465,9 +474,10 @@ export class UIManager {
       if (this.engine.particles) {
         const toolMessages = {
           hoe: 'تم تجهيز فأس الحراثة ⛏️ - اضغط على أي حوض لحرثه',
-          water: 'تم تجهيز مرشة الماء 💧 - اضغط على الأحواض لريها',
-          plant: 'تم تجهيز وضع البذر 🌱 - اختر نوع البذور واضغط للزرع',
-          harvest: 'تم تجهيز منجل الحصاد 🌾 - اضغط على المحاصيل الناضجة لحصادها'
+          water: 'تم تجهيز جردل الرش 💧 - اضغط على الأحواض لريها',
+          harvest: 'تم تجهيز منجل الحصاد 🌾 - اضغط على المحاصيل الناضجة لحصادها',
+          plant: 'وضع البذر 🌱 - اضغط على الأحواض المحروثة للزرع مباشرة',
+          hand: 'تم الرجوع إلى مؤشر اليد 👆'
         };
         if (toolMessages[toolId]) {
           this.engine.particles.addFloatingText(toolMessages[toolId], 0, 28, '#ffd166', 19);
@@ -478,16 +488,14 @@ export class UIManager {
 
   syncActionButtonsWithSelection() {
     if (!this.state) return;
-    const activeTool = this.engine?.activeTool || this.state.activeTool || 'hoe';
+    const activeTool = this.engine?.activeTool || this.state.activeTool || 'hand';
 
     const tillBtn = document.getElementById('btn-action-till');
     const waterBtn = document.getElementById('btn-action-water');
-    const plantBtn = document.getElementById('btn-action-plant');
     const harvestBtn = document.getElementById('btn-action-harvest');
 
     if (tillBtn) tillBtn.classList.toggle('active', activeTool === 'hoe');
     if (waterBtn) waterBtn.classList.toggle('active', activeTool === 'water');
-    if (plantBtn) plantBtn.classList.toggle('active', activeTool === 'plant');
     if (harvestBtn) harvestBtn.classList.toggle('active', activeTool === 'harvest');
   }
 
@@ -502,13 +510,15 @@ export class UIManager {
       return;
     }
 
+    const activeTool = this.engine?.activeTool || this.state.activeTool || 'hand';
+
     const slots = container.querySelectorAll('.stardew-slot');
     slots.forEach(slot => {
       const cropId = slot.dataset.cropId;
       if (!cropId || slot.classList.contains('locked-slot')) return;
 
       const crop = CROPS[cropId];
-      const isSelected = this.state.selectedSeed === cropId;
+      const isSelected = (activeTool === 'plant') && (this.state.selectedSeed === cropId);
       slot.classList.toggle('active', isSelected);
 
       const count = this.state.getItemTotalCount(cropId);
@@ -742,13 +752,6 @@ export class UIManager {
       });
     }
 
-    const plantBtn = document.getElementById('btn-action-plant');
-    if (plantBtn) {
-      plantBtn.addEventListener('click', () => {
-        sounds.click();
-        this.selectTool('plant');
-      });
-    }
 
     const harvestBtn = document.getElementById('btn-action-harvest');
     if (harvestBtn) {

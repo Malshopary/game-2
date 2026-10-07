@@ -293,7 +293,7 @@ export class GameEngine3D {
     this.scene.add(cursorGroup);
 
     // Active tool and selected seed state (Controlled via top action bar & bottom seed bar)
-    this.activeTool = 'hoe';
+    this.activeTool = 'hand';
     this.selectedSeed = 'corn';
 
     // Initialize procedural realistic textures (Cow hide, flannel, denim)
@@ -7243,6 +7243,17 @@ export class GameEngine3D {
         }
       }
 
+      // Escape to deselect active tool back to hand
+      if (e.code === 'Escape') {
+        if (this.ui && typeof this.ui.selectTool === 'function') {
+          this.ui.selectTool('hand');
+        } else {
+          this.activeTool = 'hand';
+          if (this.state) this.state.activeTool = 'hand';
+          this.updateCursorStyle();
+        }
+      }
+
       // E or Space to interact with hovered tile
       if (e.code === 'KeyE' || e.code === 'Space') {
         e.preventDefault();
@@ -7522,6 +7533,9 @@ export class GameEngine3D {
 
         if (this.mouseDragTotalDist > 6) {
           this.isMouseDraggingFarm = true;
+          if (this.canvas && !this.canvas.classList.contains('is-panning')) {
+            this.canvas.classList.add('is-panning');
+          }
           const camRight = new THREE.Vector3(1, 0, 0).applyQuaternion(this.camera.quaternion);
           camRight.y = 0;
           camRight.normalize();
@@ -7622,6 +7636,7 @@ export class GameEngine3D {
         this.isBuilderPainting = false;
       }
 
+      if (this.canvas) this.canvas.classList.remove('is-panning');
       if (this.mouseDragPanActive) {
         this.mouseDragPanActive = false;
         if (!this.isMouseDraggingFarm && (this.mouseDragTotalDist || 0) <= 6 && e.button === 0) {
@@ -7632,6 +7647,7 @@ export class GameEngine3D {
     });
 
     window.addEventListener('pointercancel', () => {
+      if (this.canvas) this.canvas.classList.remove('is-panning');
       this.mouseDragPanActive = false;
       this.isMouseDraggingFarm = false;
       this.edgePanDir.set(0, 0);
@@ -7639,13 +7655,24 @@ export class GameEngine3D {
     });
 
     window.addEventListener('pointerleave', () => {
+      if (this.canvas) this.canvas.classList.remove('is-panning');
       this.mouseDragPanActive = false;
       this.isMouseDraggingFarm = false;
       this.edgePanDir.set(0, 0);
       this.isEdgePanning = false;
     });
 
-    this.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+    this.canvas.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      // Right click deselects active tool back to hand
+      if (this.ui && typeof this.ui.selectTool === 'function') {
+        this.ui.selectTool('hand');
+      } else {
+        this.activeTool = 'hand';
+        if (this.state) this.state.activeTool = 'hand';
+        this.updateCursorStyle();
+      }
+    });
 
     // Mouse wheel zoom with frustum & golden angle preservation
     this.canvas.addEventListener('wheel', (e) => {
@@ -7743,12 +7770,33 @@ export class GameEngine3D {
       const key = data.key;
       const plotPos = plotObj.position;
       const crop = this.crops.get(key);
-      const activeTool = this.activeTool || this.state?.activeTool || 'hoe';
+      const activeTool = this.activeTool || this.state?.activeTool || 'hand';
       const isHoe = activeTool === 'hoe';
       const isWater = activeTool === 'water';
       const isHarvest = activeTool === 'harvest';
       const isPlant = activeTool === 'plant';
+      const isHand = activeTool === 'hand' || !activeTool;
       const selectedSeed = this.state?.selectedSeed || this.selectedSeed || 'corn';
+
+      // 0. Hand Inspection Mode: When no specific farm tool is active
+      if (isHand) {
+        sounds.click();
+        if (crop && crop.isMature) {
+          const cropDef = CROPS[crop.cropType] || { name: crop.cropType };
+          this.particles.addFloatingText(`${cropDef.name}: ناضج تماماً! 🌾 اختر منجل الحصاد لحصاده`, plotPos.x, 25, '#ffd166', 18);
+        } else if (crop && !crop.isMature) {
+          const cropDef = CROPS[crop.cropType] || { name: crop.cropType };
+          const pct = Math.min(99, Math.round((crop.growthTimer / crop.growthTime) * 100));
+          this.particles.addFloatingText(`${cropDef.name}: في مرحلة النمو 🌱 (${pct}%)`, plotPos.x, 25, '#86efac', 17);
+        } else if (data.state === 'grass') {
+          this.particles.addFloatingText('أرض عشبية 🌿 - اختر فأس الحراثة ⛏️ لحرثها', plotPos.x, 25, '#fed7aa', 17);
+        } else if (data.state === 'tilled') {
+          this.particles.addFloatingText('أرض محروثة جافة - اختر السقي 💧 أو اختر بذرة للزرع', plotPos.x, 25, '#fed7aa', 17);
+        } else if (data.state === 'watered') {
+          this.particles.addFloatingText('أرض مروية رطبة 💧 - اختر نوع البذور من الأسفل للزرع مباشرة', plotPos.x, 25, '#38bdf8', 17);
+        }
+        return;
+      }
 
       // A. Ripe Crop Harvest: When Harvest tool (Scythe) is selected
       if (crop && crop.isMature) {
@@ -9087,6 +9135,7 @@ export class GameEngine3D {
           !obj.userData.isPet &&
           !obj.userData.isTrough &&
           !obj.userData.isAnimal &&
+          !obj.userData.isFarmer &&
           obj.parent &&
           obj.parent !== this.scene
         ) {
@@ -9111,7 +9160,8 @@ export class GameEngine3D {
           obj.userData.isExpansionSign ||
           obj.userData.isPet ||
           obj.userData.isTrough ||
-          obj.userData.isAnimal)
+          obj.userData.isAnimal ||
+          obj.userData.isFarmer)
       ) {
         this.hoveredObject = obj;
 
@@ -9123,64 +9173,141 @@ export class GameEngine3D {
       }
     }
 
-    // Dynamic Contextual Cursor Update (Farmer Hand, Hoe, Sickle, Water, Seed)
+    // Dynamic Contextual Cursor Update (Farmer Hand, Hoe, Sickle, Water, Seed Fruit)
     this.updateCursorStyle();
   }
 
-  // Update dynamic mouse cursor icon based on hovering and active tool
-  updateCursorStyle() {
-    let cursorClass = 'cursor-hand'; // Default: Farmer's hand ("ايد مزارع")
-
-    const selectedItem = this.state ? this.state.getSelectedItem() : null;
-    const selectedId = selectedItem ? selectedItem.id : null;
-    const selectedType = selectedItem ? selectedItem.type : null;
-
-    if (this.hoveredObject && this.hoveredObject.userData) {
-      const data = this.hoveredObject.userData;
-      if (data.isPlot) {
-        const crop = this.crops ? this.crops.get(data.key) : null;
-        if (crop && crop.isMature) {
-          // 1. Ripe crop ready for harvest -> Harvesting Sickle ("منجل الحصاد")
-          cursorClass = 'cursor-sickle';
-        } else if (data.state === 'grass') {
-          // 2. Untilled grass turf -> Farmer's Hoe ("شكل الفاس")
-          cursorClass = 'cursor-hoe';
-        } else if (data.state === 'tilled') {
-          // 3. Tilled soil: if holding water -> Watering Can, if holding seed -> Seed
-          if (selectedId === 'water') {
-            cursorClass = 'cursor-water';
-          } else if (selectedType === 'seed' || selectedId?.includes('seed')) {
-            cursorClass = 'cursor-seed';
-          } else {
-            // Default on dry tilled soil: Watering Can ("جردل الرش المياه")
-            cursorClass = 'cursor-water';
-          }
-        } else if (data.state === 'watered' && !crop) {
-          // 4. Moist soil ready for planting -> Seed Pouch ("وانا بزرع")
-          cursorClass = 'cursor-seed';
-        }
-      } else if (data.isAnimal || data.isPet) {
-        // Petting / interacting with animals -> Farmer's Hand
-        cursorClass = 'cursor-hand';
-      }
-    } else {
-      // Not hovering over plot: determine by selected tool in hotbar
-      if (selectedId === 'hoe') {
-        cursorClass = 'cursor-hoe';
-      } else if (selectedId === 'water') {
-        cursorClass = 'cursor-water';
-      } else if (selectedId === 'scythe') {
-        cursorClass = 'cursor-sickle';
-      } else if (selectedType === 'seed' || selectedId?.includes('seed')) {
-        cursorClass = 'cursor-seed';
-      }
+  // Generate and cache dynamic fruit/crop cursor shaped like the selected fruit/crop
+  getCropCursorStyle(cropId) {
+    if (!this._cropCursorCache) {
+      this._cropCursorCache = {};
+    }
+    const safeCropId = cropId || this.state?.selectedSeed || this.selectedSeed || 'corn';
+    if (this._cropCursorCache[safeCropId]) {
+      return this._cropCursorCache[safeCropId];
     }
 
-    if (this.canvas) {
-      if (!this.canvas.classList.contains(cursorClass)) {
-        this.canvas.classList.remove('cursor-hand', 'cursor-hoe', 'cursor-sickle', 'cursor-water', 'cursor-seed');
-        this.canvas.classList.add(cursorClass);
-      }
+    const cropDef = CROPS[safeCropId] || { icon: '🌱', name: 'Seed' };
+    const icon = cropDef.icon || '🌱';
+
+    try {
+      const canvas = document.createElement('canvas');
+      canvas.width = 36;
+      canvas.height = 36;
+      const ctx = canvas.getContext('2d');
+
+      // 1. Outer contrast shadow so it pops on dark soil, bright grass and water
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.65)';
+      ctx.shadowBlur = 4;
+      ctx.shadowOffsetX = 1;
+      ctx.shadowOffsetY = 2;
+
+      // 2. Soft circular parchment badge with rustic golden border
+      ctx.beginPath();
+      ctx.arc(20, 20, 13, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(255, 253, 240, 0.96)';
+      ctx.fill();
+      ctx.lineWidth = 1.8;
+      ctx.strokeStyle = '#b45309';
+      ctx.stroke();
+
+      // Clear shadow for crisp emoji rendering
+      ctx.shadowColor = 'transparent';
+      ctx.shadowBlur = 0;
+      ctx.shadowOffsetX = 0;
+      ctx.shadowOffsetY = 0;
+
+      // 3. Render the Fruit / Crop emoji prominently in the center
+      ctx.font = '20px "Segoe UI Emoji", "Noto Color Emoji", "Apple Color Emoji", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(icon, 20, 20.5);
+
+      // 4. Sharp precision pointer arrowhead at top-left (hotspot 3, 3)
+      ctx.fillStyle = '#f59e0b'; // golden amber
+      ctx.strokeStyle = '#1c1917'; // dark crisp stroke
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.moveTo(3, 3);
+      ctx.lineTo(13, 5);
+      ctx.lineTo(8, 8);
+      ctx.lineTo(5, 13);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+
+      // Specular highlight dot on pointer tip
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(4, 4, 1.5, 1.5);
+
+      const dataUrl = canvas.toDataURL('image/png');
+      const cursorVal = `url("${dataUrl}") 3 3, auto`;
+      this._cropCursorCache[safeCropId] = cursorVal;
+      return cursorVal;
+    } catch (e) {
+      console.warn('Failed to generate crop cursor canvas, using fallback', e);
+      return 'var(--cursor-seed)';
+    }
+  }
+
+  // Update dynamic mouse cursor icon based on active tool and contextual hovering
+  updateCursorStyle() {
+    if (!this.canvas) return;
+
+    let cursorClass = 'cursor-hand';
+    let customCursorValue = null;
+
+    const activeTool = this.activeTool || this.state?.activeTool || 'hand';
+    const selectedSeed = this.state?.selectedSeed || this.selectedSeed || 'corn';
+
+    // Interactive entities always display the Hand cursor (animals, pets, farmer, signposts, troughs)
+    const isInteractiveEntity = Boolean(
+      this.hoveredObject &&
+      this.hoveredObject.userData &&
+      (
+        this.hoveredObject.userData.isAnimal ||
+        this.hoveredObject.userData.isPet ||
+        this.hoveredObject.userData.isFarmer ||
+        this.hoveredObject.userData.rootFarmer ||
+        this.hoveredObject === this.farmerGroup ||
+        this.hoveredObject.userData.isLockTrigger ||
+        this.hoveredObject.userData.isFarmSign ||
+        this.hoveredObject.userData.isExpansionSign ||
+        this.hoveredObject.userData.isTrough
+      )
+    );
+
+    if (isInteractiveEntity) {
+      // 1. Hovering over animals, pets, farmer or interactive objects -> Hand ("مؤشر الإيد 👆")
+      cursorClass = 'cursor-hand';
+    } else if (activeTool === 'hoe') {
+      // 2. Till tool selected -> Hoe ("فأس الحراثة ⛏️")
+      cursorClass = 'cursor-hoe';
+    } else if (activeTool === 'water') {
+      // 3. Water tool selected -> Watering Can / Bucket ("جردل الرش 💧")
+      cursorClass = 'cursor-water';
+    } else if (activeTool === 'harvest') {
+      // 4. Harvest tool selected -> Sickle / Scythe ("منجل الحصاد 🌾")
+      cursorClass = 'cursor-sickle';
+    } else if (activeTool === 'plant') {
+      // 5. Seed selected -> Shape of that specific fruit / crop ("شكل الفاكهة أو الزرعة")
+      cursorClass = 'cursor-seed';
+      customCursorValue = this.getCropCursorStyle(selectedSeed);
+    } else {
+      // 6. Default / Hand tool -> Hand ("مؤشر الإيد لما أقف على أي حاجة 👆")
+      cursorClass = 'cursor-hand';
+    }
+
+    if (!this.canvas.classList.contains(cursorClass)) {
+      this.canvas.classList.remove('cursor-hand', 'cursor-hoe', 'cursor-sickle', 'cursor-water', 'cursor-seed');
+      this.canvas.classList.add(cursorClass);
+    }
+
+    if (cursorClass === 'cursor-seed' && customCursorValue) {
+      this.canvas.style.setProperty('--cursor-current-seed', customCursorValue);
+      this.canvas.style.cursor = customCursorValue;
+    } else {
+      this.canvas.style.cursor = '';
     }
   }
 }

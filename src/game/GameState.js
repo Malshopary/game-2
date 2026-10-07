@@ -68,7 +68,7 @@ export class GameState {
     // Hotbar (10 Items) - Hoe, Water, Scythe, 12 Corn Seeds
     this.hotbar = JSON.parse(JSON.stringify(HOTBAR_ITEMS));
     this.selectedSlot = 0;
-    this.activeTool = 'hoe'; // Default active tool: 'hoe' | 'water' | 'plant' | 'harvest'
+    this.activeTool = 'hand'; // Default active tool: 'hand' | 'hoe' | 'water' | 'plant' | 'harvest'
     this.selectedSeed = 'corn'; // Default active seed: 'corn'
 
     // Extra Storage Backpack (Empty on new game)
